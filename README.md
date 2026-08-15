@@ -1,5 +1,7 @@
 # shape-rotator
 
+At last anyone can be a shape rotator!
+
 Turn a codebase into an interactive machine diagram that shows how the
 program works, from inputs to outputs, the way a cutaway drawing shows a
 jet engine.
