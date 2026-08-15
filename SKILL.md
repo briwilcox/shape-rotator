@@ -91,10 +91,10 @@ wherever they asked), unless they say otherwise.
   angle, over the poles too; flick for momentum.
 - Logic vs data: every edge carries gold logic pulses (calls, in the
   arrowhead direction) and blue data droplets (returns, the opposite way).
-- Click any building to trace it: the rest dims, what it calls into
-  lights cyan, what calls it lights orange, and a side panel lists both.
-  The panel entries are clickable, so the user can walk the graph file by
-  file.
+- Click any building to isolate the flows to and from it: unrelated
+  streams and files dim, what it calls into lights cyan, what calls it
+  lights orange, and a side panel lists both. The panel entries are
+  clickable, so the user can walk the graph file by file.
 - The `view: folder rivers` toggle (3D flow): per-file streams aggregate
   into thick folder-to-folder rivers, the architecture-level flow.
 - Hover tooltips (path, LOC, language, depends-on/used-by counts), gold

@@ -54,9 +54,10 @@ imports.
 
 Every view draws two flows on the same edges. Gold pulses are logic: calls
 running from importer to imported, the direction the arrowheads point. Blue
-droplets are data: results returning the other way. Click a file to trace
-it; the scene dims, its dependencies light up cyan, its dependents light up
-orange, and a side panel lets you walk the graph file by file. A legend
+droplets are data: results returning the other way. Click any element to isolate the flows to and from it: unrelated streams
+and files dim, calls out to its dependencies run cyan, calls in from its
+dependents run orange, and a side panel lists both so you can walk the
+graph file by file. Click empty space to release it. A legend
 shows how much of the codebase each language accounts for.
 
 The output is one HTML file that loads nothing from the network and needs
