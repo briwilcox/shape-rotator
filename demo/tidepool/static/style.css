@@ -1,0 +1,22 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #0b1622;
+  color: #dce8f5;
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+h1 { color: #3aa0ff; }
+
+#summary li { margin: 0.25rem 0; }
+
+#charts canvas {
+  display: block;
+  margin: 0.5rem 0;
+  background: #10202f;
+  border-radius: 4px;
+}
+
+form { display: flex; gap: 0.5rem; margin-top: 1rem; }
+input { flex: 1; min-width: 0; }

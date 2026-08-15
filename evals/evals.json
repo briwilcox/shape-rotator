@@ -1,0 +1,60 @@
+{
+  "skill_name": "shape-rotator",
+  "evals": [
+    {
+      "id": 0,
+      "name": "python-crm-3d-viz",
+      "prompt": "Can you give me a 3D visualization of my codebase at demo/tidepool (inside this skill's directory)? I want to see the structure of it like a city or something and watch the data flowing through it like water between the files. Make it interactive so I can rotate it around.",
+      "expected_output": "A self-contained interactive HTML file showing the repo as a 3D city with buildings per file and animated particle flow along import edges, plus a narration of what the visualization reveals.",
+      "files": [],
+      "assertions": [
+        "An interactive HTML deliverable exists in the outputs directory",
+        "The HTML is fully self-contained: no external scripts, stylesheets, or CDN URLs are loaded (offline-safe)",
+        "The visualization is genuinely 3D and user-rotatable (drag/auto-rotate handlers wired up), with animated flow along dependency edges",
+        "The embedded data reflects the real target repo: actual file paths appear in the HTML and dependency edges are non-empty",
+        "Inputs-to-outputs pipeline: files are staged by dependency depth with a labeled intake (entrypoints) end and a labeled core (most-depended-on) end",
+        "The directory hierarchy is visible and labeled in the scene (folder plates or folder tags)",
+        "Click-to-trace: clicking a building dims the scene, highlights its dependencies vs dependents in distinct colors, and opens a panel listing both",
+        "An aggregated folder-to-folder flow view is available (architecture-level rivers)",
+        "The final user-facing response explains how the program works using the pipeline (what's at the intake, what's in the core), naming actual files"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "casual-shape-rotate",
+      "prompt": "shape rotate demo/tidepool for me - i wanna spin my codebase around in 3d lol",
+      "expected_output": "An interactive rotatable 3D visualization HTML of the target repo, produced without the user spelling out details.",
+      "files": [],
+      "assertions": [
+        "An interactive HTML deliverable exists in the outputs directory",
+        "The HTML is fully self-contained: no external scripts, stylesheets, or CDN URLs are loaded (offline-safe)",
+        "The visualization is genuinely 3D and user-rotatable (drag/auto-rotate handlers wired up), with animated flow along dependency edges",
+        "The embedded data reflects the real target repo: actual file paths appear in the HTML and dependency edges are non-empty",
+        "Inputs-to-outputs pipeline: files are staged by dependency depth with a labeled intake (entrypoints) end and a labeled core (most-depended-on) end",
+        "The directory hierarchy is visible and labeled in the scene (folder plates or folder tags)",
+        "Click-to-trace: clicking a building dims the scene, highlights its dependencies vs dependents in distinct colors, and opens a panel listing both",
+        "An aggregated folder-to-folder flow view is available (architecture-level rivers)",
+        "The final user-facing response explains how the program works using the pipeline (what's at the intake, what's in the core), naming actual files"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "typescript-repo-map",
+      "prompt": "I'm trying to get oriented in an unfamiliar repo (use demo/tidepool inside this skill's directory as the target). Build me a visual 3d map of the codebase - which files are biggest, how the modules depend on each other, where the data flows. Something I can open in my browser and explore.",
+      "expected_output": "A browser-openable interactive 3D map of the repo with size-scaled structures and dependency/data-flow animation, plus concrete orientation guidance.",
+      "files": [],
+      "assertions": [
+        "An interactive HTML deliverable exists in the outputs directory",
+        "The HTML is fully self-contained: no external scripts, stylesheets, or CDN URLs are loaded (offline-safe)",
+        "The visualization is genuinely 3D and user-rotatable (drag/auto-rotate handlers wired up), with animated flow along dependency edges",
+        "The embedded data reflects the real target repo: actual file paths appear in the HTML and dependency edges are non-empty",
+        "Inputs-to-outputs pipeline: files are staged by dependency depth with a labeled intake (entrypoints) end and a labeled core (most-depended-on) end",
+        "The directory hierarchy is visible and labeled in the scene (folder plates or folder tags)",
+        "Click-to-trace: clicking a building dims the scene, highlights its dependencies vs dependents in distinct colors, and opens a panel listing both",
+        "An aggregated folder-to-folder flow view is available (architecture-level rivers)",
+        "The final user-facing response explains how the program works using the pipeline (what's at the intake, what's in the core), naming actual files",
+        "File size (lines of code) visibly maps to structure size, satisfying the 'which files are biggest' ask"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tidepool - shape rotator</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #0a0e17; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #c8d3e8; }
+  #scene { position: absolute; inset: 0; cursor: grab; }
+  #scene.dragging { cursor: grabbing; }
+  .hud { position: absolute; pointer-events: none; z-index: 2; }
+  #title { top: 18px; left: 22px; }
+  #title h1 { font-size: 20px; font-weight: 600; color: #eaf2ff; letter-spacing: 0.5px; }
+  #title h1 .dim { color: #5a6a8a; font-weight: 400; }
+  #stats { margin-top: 6px; font-size: 12px; color: #7f8fb0; }
+  #legend { bottom: 20px; left: 22px; font-size: 12px; width: 200px; }
+  #legend .row { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+  #legend .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+  #legend .sw.dot { width: 9px; height: 9px; border-radius: 50%; margin: 0 1.5px; }
+  #legend .bar { display: flex; width: 100%; height: 5px; border-radius: 3px; overflow: hidden; margin-bottom: 7px; }
+  #legend .bar span { display: block; height: 100%; }
+  #legend .flows { margin-top: 10px; }
+  #controls { top: 18px; right: 22px; display: flex; gap: 8px; pointer-events: auto; z-index: 4; }
+  #controls button, #controls select, #howto button {
+    background: rgba(30, 41, 66, 0.85); color: #c8d3e8; border: 1px solid #2c3b5c;
+    border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  #controls button:hover, #controls select:hover { background: rgba(44, 59, 92, 0.9); }
+  #controls select option { background: #131c30; color: #c8d3e8; }
+  #controls button.active { border-color: #5b8dd9; color: #bcd8ff; }
+  #tooltip {
+    position: absolute; display: none; z-index: 3; pointer-events: none;
+    background: rgba(13, 19, 33, 0.94); border: 1px solid #33456e; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; max-width: 340px; box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #tooltip .path { color: #8fd3ff; font-weight: 600; word-break: break-all; }
+  #tooltip .meta { margin-top: 5px; color: #8494b5; line-height: 1.6; }
+  #howto {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(13, 19, 33, 0.92); border: 1px solid #2c3b5c; border-radius: 10px;
+    padding: 12px 16px; font-size: 12px; z-index: 3; max-width: 560px; line-height: 1.75;
+    color: #97a7c8;
+  }
+  #howto b { color: #cfe0fa; font-weight: 600; }
+  #howto .dismiss { margin-top: 8px; padding: 4px 10px; }
+  #panel {
+    position: absolute; top: 64px; right: 22px; bottom: 20px; width: 300px; z-index: 3;
+    background: rgba(13, 19, 33, 0.94); border: 1px solid #33456e; border-radius: 10px;
+    padding: 14px; font-size: 12px; display: none; overflow-y: auto;
+  }
+  #panel h2 { font-size: 13px; color: #8fd3ff; word-break: break-all; line-height: 1.5; }
+  #panel .meta { color: #7f8fb0; margin: 6px 0 10px; line-height: 1.6; }
+  #panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 4px; }
+  #panel h3.deps { color: #7fd4ff; }
+  #panel h3.users { color: #ffb37f; }
+  #panel .item { padding: 4px 6px; border-radius: 5px; cursor: pointer; color: #b7c6e4; word-break: break-all; }
+  #panel .item:hover { background: rgba(60, 90, 150, 0.35); color: #e6f0ff; }
+  #panel .none { color: #5a6a8a; font-style: italic; padding: 2px 6px; }
+  #panel .close { position: absolute; top: 10px; right: 10px; cursor: pointer; color: #5a6a8a; padding: 2px 7px; }
+  #panel .close:hover { color: #c8d3e8; }
+  #hintline { bottom: 20px; right: 22px; font-size: 11px; color: #5a6a8a; text-align: right; line-height: 1.7; }
+  #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: #7f8fb0; font-size: 14px; }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div class="hud" id="title"><h1><span id="repo-name"></span> <span class="dim">// shape rotator</span></h1><div id="stats"></div></div>
+<div class="hud" id="legend"></div>
+<div class="hud" id="hintline">drag to rotate &middot; scroll to zoom &middot; click a building to trace it</div>
+<div class="hud" id="controls">
+  <select id="mode-select" title="Visualization mode">
+    <option value="engine">engine</option>
+    <option value="orbit">orbit</option>
+    <option value="circuit">circuit</option>
+    <option value="arc">arc</option>
+    <option value="pipeline">3d flow</option>
+  </select>
+  <button id="btn-view" title="Switch between per-file streams and folder-level rivers">view: file streams</button>
+  <button id="btn-pause">pause flow</button>
+  <button id="btn-spin">stop spin</button>
+  <button id="btn-help">?</button>
+</div>
+<div id="howto">
+  <b>How to read this:</b> the repo is laid out like an engine, inputs to outputs. Execution enters at the <b>intake</b> (entrypoints, gold beacons) on the left; each <b>stage</b> is what the previous stage imports; everything settles into the <b>core</b> on the right, the modules the whole program leans on. Every connection carries two currents: <b style="color:#ffd278">gold pulses are logic</b>, calls flowing from importer to imported, the way the arrowheads point; <b style="color:#78beff">blue droplets are data</b>, results returning the opposite way. Each <b>building</b> is a file (taller = more lines, color = language), grouped and tagged by folder. <b>Click any building</b> to trace what it depends on (<span style="color:#7fd4ff">cyan</span>) and what depends on it (<span style="color:#ffb37f">orange</span>). The <b>mode</b> menu switches five views: the <b>engine</b> schematic (this one; phases run left to right and ribbons heat up from blue to red as they go deeper), an <b>orbit</b> constellation of folder clusters you can tumble to any angle, a <b>circuit</b> board of folder chips and copper traces, an <b>arc</b> skyline of import arcs, and a rotatable <b>3d flow</b> pipeline where <b>view: folder rivers</b> aggregates flow folder-to-folder.
+  <div><button class="dismiss" id="howto-dismiss">got it</button></div>
+</div>
+<div id="panel">
+  <div class="close" id="panel-close">&times;</div>
+  <h2 id="panel-path"></h2>
+  <div class="meta" id="panel-meta"></div>
+  <h3 class="deps">calls into &middot; sends logic to <span id="panel-dep-count"></span></h3>
+  <div id="panel-deps"></div>
+  <h3 class="users">called by &middot; feeds data to <span id="panel-user-count"></span></h3>
+  <div id="panel-users"></div>
+</div>
+<div id="tooltip"></div>
+<div id="empty">No source files found in this codebase.</div>
+<script>
+"use strict";
+const DATA = {"name": "tidepool", "files": [{"path": "config.py", "dir": ".", "loc": 18, "lang": "python", "entry": false}, {"path": "db.py", "dir": ".", "loc": 40, "lang": "python", "entry": false}, {"path": "main.py", "dir": ".", "loc": 20, "lang": "python", "entry": true}, {"path": "models.py", "dir": ".", "loc": 22, "lang": "python", "entry": false}, {"path": "report.py", "dir": ".", "loc": 20, "lang": "python", "entry": false}, {"path": "routes.py", "dir": ".", "loc": 22, "lang": "python", "entry": false}, {"path": "services.py", "dir": ".", "loc": 28, "lang": "python", "entry": false}, {"path": "utils.py", "dir": ".", "loc": 20, "lang": "python", "entry": false}, {"path": "static/api.js", "dir": "static", "loc": 19, "lang": "javascript", "entry": false}, {"path": "static/app.js", "dir": "static", "loc": 24, "lang": "javascript", "entry": true}, {"path": "static/charts.js", "dir": "static", "loc": 30, "lang": "javascript", "entry": false}, {"path": "static/index.html", "dir": "static", "loc": 20, "lang": "html", "entry": true}, {"path": "static/style.css", "dir": "static", "loc": 22, "lang": "css", "entry": false}], "edges": [{"from": 1, "to": 0, "weight": 1}, {"from": 2, "to": 0, "weight": 1}, {"from": 2, "to": 5, "weight": 1}, {"from": 3, "to": 1, "weight": 1}, {"from": 4, "to": 0, "weight": 1}, {"from": 4, "to": 3, "weight": 1}, {"from": 4, "to": 6, "weight": 1}, {"from": 4, "to": 7, "weight": 1}, {"from": 5, "to": 3, "weight": 1}, {"from": 5, "to": 6, "weight": 1}, {"from": 6, "to": 1, "weight": 1}, {"from": 6, "to": 3, "weight": 1}, {"from": 6, "to": 7, "weight": 1}, {"from": 7, "to": 0, "weight": 1}, {"from": 9, "to": 8, "weight": 1}, {"from": 9, "to": 10, "weight": 1}, {"from": 10, "to": 8, "weight": 1}], "totals": {"files": 13, "loc": 305, "edges": 17}};
+
+const LANG_COLORS = {
+  python:     [79, 163, 255],
+  javascript: [255, 205, 84],
+  typescript: [93, 135, 255],
+  go:         [86, 214, 214],
+  rust:       [255, 148, 92],
+  ruby:       [255, 99, 112],
+  java:       [212, 122, 235],
+  kotlin:     [190, 140, 255],
+  swift:      [255, 128, 64],
+  c:          [150, 170, 200],
+  cpp:        [120, 150, 220],
+  csharp:     [140, 220, 130],
+  php:        [130, 140, 230],
+  html:       [255, 130, 90],
+  css:        [110, 200, 255],
+  shell:      [140, 230, 160],
+  sql:        [230, 190, 120],
+  lua:        [110, 130, 255],
+  elixir:     [180, 120, 220],
+  vue:        [80, 220, 160],
+  svelte:     [255, 110, 60],
+  other:      [130, 145, 175],
+};
+const DEP_COLOR = "rgba(127, 212, 255, ";   // what focused file depends on
+const USER_COLOR = "rgba(255, 179, 127, ";  // what uses the focused file
+// The two currents on every edge: warm gold logic (calls, importer -> imported,
+// the arrowhead direction) and cool blue data (returns, flowing back).
+const LOGIC_COLOR = "rgba(255, 210, 120, ";
+const DATA_COLOR = "rgba(120, 190, 255, ";
+
+const canvas = document.getElementById("scene");
+const ctx = canvas.getContext("2d");
+const tooltip = document.getElementById("tooltip");
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ---------- Model ----------
+// The folder tree groups files for every mode; buildings are the shared
+// per-file records the renderers draw from. 3D positions come from the
+// pipeline layout below.
+const CELL = 11, BW = 7;
+
+function buildTree(data) {
+  const root = { name: data.name, path: "", children: new Map(), files: [], level: 0 };
+  data.files.forEach((f, i) => {
+    const parts = f.dir === "." ? [] : f.dir.split("/");
+    let node = root;
+    for (const p of parts) {
+      if (!node.children.has(p)) {
+        node.children.set(p, {
+          name: p, path: node.path ? node.path + "/" + p : p,
+          children: new Map(), files: [], level: node.level + 1,
+        });
+      }
+      node = node.children.get(p);
+    }
+    node.files.push(i);
+  });
+  // Collapse single-child chains (a/ containing only b/) into one labeled
+  // group "a/b" - keeps deep trees legible without stacked empty groups.
+  (function collapse(node) {
+    for (const [key, child] of [...node.children]) {
+      let c = child;
+      while (c.children.size === 1 && c.files.length === 0) {
+        const inner = [...c.children.values()][0];
+        c = { ...inner, name: c.name + "/" + inner.name };
+      }
+      node.children.set(key, c);
+      collapse(c);
+    }
+  })(root);
+  (function relevel(node, lvl) {
+    node.level = lvl;
+    for (const c of node.children.values()) relevel(c, lvl + 1);
+  })(root, 0);
+  return root;
+}
+
+function buildModel(data) {
+  const root = buildTree(data);
+  const buildings = new Array(data.files.length);
+  (function collect(node) {
+    for (const child of node.children.values()) collect(child);
+    for (const fi of node.files) {
+      const f = data.files[fi];
+      buildings[fi] = {
+        f, x: 0, z: 0, baseY: 0,
+        h: 4 + 3.4 * Math.log2(f.loc + 2),
+        color: LANG_COLORS[f.lang] || LANG_COLORS.other,
+        node,
+        inDeg: 0, outDeg: 0,
+      };
+    }
+  })(root);
+  for (const e of data.edges) {
+    if (buildings[e.from]) buildings[e.from].outDeg++;
+    if (buildings[e.to]) buildings[e.to].inDeg++;
+  }
+  return { buildings, root, span: 100 };
+}
+
+// ---------- Pipeline layout: inputs -> outputs, like flow through an engine ----------
+// Files are staged by dependency depth: stage 0 (intake) = files nothing else
+// imports (entrypoints, scripts); each next stage = what the previous stage
+// imports; the last stage (core) = the modules everything settles into.
+const STAGE_GAP = 34, MAX_STAGE = 12;
+
+function buildPipeline(data, buildings) {
+  const n = data.files.length;
+  // Import cycles would inflate naive longest-path layering, so first condense
+  // strongly-connected components (Tarjan, iterative): every file in a cycle
+  // shares a stage, and the SCC graph is a DAG we can layer exactly.
+  const adj = Array.from({ length: n }, () => []);
+  for (const e of data.edges) adj[e.from].push(e.to);
+  const sccId = new Array(n).fill(-1);
+  {
+    const low = new Array(n).fill(0), num = new Array(n).fill(-1), onStk = new Array(n).fill(false);
+    const stk = [];
+    let counter = 0, sccCount = 0;
+    for (let s0 = 0; s0 < n; s0++) {
+      if (num[s0] !== -1) continue;
+      const call = [[s0, 0]];
+      while (call.length) {
+        const frame = call[call.length - 1];
+        const [v] = frame;
+        if (frame[1] === 0) {
+          num[v] = low[v] = counter++;
+          stk.push(v); onStk[v] = true;
+        }
+        let advanced = false;
+        while (frame[1] < adj[v].length) {
+          const w = adj[v][frame[1]++];
+          if (num[w] === -1) { call.push([w, 0]); advanced = true; break; }
+          else if (onStk[w]) low[v] = Math.min(low[v], num[w]);
+        }
+        if (advanced) continue;
+        if (low[v] === num[v]) {
+          for (;;) {
+            const w = stk.pop(); onStk[w] = false;
+            sccId[w] = sccCount;
+            if (w === v) break;
+          }
+          sccCount++;
+        }
+        call.pop();
+        if (call.length) {
+          const u = call[call.length - 1][0];
+          low[u] = Math.min(low[u], low[v]);
+        }
+      }
+    }
+  }
+  // Longest-path layering on the SCC DAG.
+  const sccLayer = new Map();
+  for (let i = 0; i < n; i++) sccLayer.set(sccId[i], 0);
+  for (let pass = 0; pass < sccLayer.size; pass++) {
+    let changed = false;
+    for (const e of data.edges) {
+      const a = sccId[e.from], b = sccId[e.to];
+      if (a === b) continue;
+      const cand = sccLayer.get(a) + 1;
+      if (cand > sccLayer.get(b) && cand <= MAX_STAGE) { sccLayer.set(b, cand); changed = true; }
+    }
+    if (!changed) break;
+  }
+  const isolated = i => buildings[i] && buildings[i].inDeg === 0 && buildings[i].outDeg === 0;
+  // Compress to consecutive stage numbers (drop empty layers).
+  const used = [...new Set([...Array(n).keys()].filter(i => !isolated(i)).map(i => sccLayer.get(sccId[i])))].sort((a, b) => a - b);
+  const remap = new Map(used.map((l, k) => [l, k]));
+  const layer = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) layer[i] = remap.get(sccLayer.get(sccId[i])) || 0;
+  let maxLayer = 0;
+  for (let i = 0; i < n; i++) if (!isolated(i)) maxLayer = Math.max(maxLayer, layer[i]);
+  for (let i = 0; i < n; i++) if (buildings[i]) buildings[i].stage = isolated(i) ? -1 : layer[i];
+
+  // Group each stage by folder so the hierarchy stays readable inside stages.
+  const stages = [];
+  for (let sIdx = 0; sIdx <= maxLayer; sIdx++) {
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      if (!buildings[i] || isolated(i) || layer[i] !== sIdx) continue;
+      const key = buildings[i].node.path || "/";
+      if (!groups.has(key)) groups.set(key, { name: buildings[i].node.name, idxs: [] });
+      groups.get(key).idxs.push(i);
+    }
+    stages.push({ groups: [...groups.values()].sort((a, b) => b.idxs.length - a.idxs.length) });
+  }
+  const iso = [];
+  for (let i = 0; i < n; i++) if (buildings[i] && isolated(i)) iso.push(i);
+
+  // Place: X = stage axis, Z = files within a stage (grouped by folder).
+  const stageMeta = [];
+  const groupLabels = [];
+  const COLS = 2;
+  let maxHalfZ = 0;
+  stages.forEach((st, sIdx) => {
+    const x = sIdx * (COLS * CELL + STAGE_GAP);
+    let z = 0;
+    const placed = [];
+    for (const g of st.groups) {
+      const gz0 = z;
+      g.idxs.sort((a, b) => data.files[b].loc - data.files[a].loc);
+      g.idxs.forEach((fi, k) => {
+        placed.push([fi, x + (k % COLS) * CELL, z + Math.floor(k / COLS) * CELL]);
+      });
+      const rows = Math.ceil(g.idxs.length / COLS);
+      z += rows * CELL;
+      groupLabels.push({ stage: sIdx, name: g.name, x: x + CELL / 2, z0: gz0, z1: z });
+      z += 6;
+    }
+    const halfZ = (z - 6) / 2;
+    maxHalfZ = Math.max(maxHalfZ, halfZ);
+    for (const [fi, px, pz] of placed) {
+      buildings[fi].pipePos = { x: px, z: pz - halfZ, baseY: 0 };
+    }
+    for (const gl of groupLabels) if (gl.stage === sIdx && gl.halfZ === undefined) {
+      gl.halfZ = halfZ;
+    }
+    stageMeta.push({
+      x: x + (COLS * CELL) / 2 - CELL / 2, halfZ,
+      label: sIdx === 0 ? "intake: entrypoints"
+           : sIdx === maxLayer ? "core: most depended on"
+           : "stage " + (sIdx + 1),
+      count: st.groups.reduce((sum, g) => sum + g.idxs.length, 0),
+    });
+  });
+  // Files with no tracked imports sit in a bypass row behind the machine.
+  const isoCols = Math.max(1, Math.ceil(iso.length / 3));
+  iso.sort((a, b) => data.files[b].loc - data.files[a].loc).forEach((fi, k) => {
+    buildings[fi].iso = true;
+    buildings[fi].pipePos = {
+      x: (k % isoCols) * CELL,
+      z: maxHalfZ + 48 + Math.floor(k / isoCols) * CELL,
+      baseY: 0,
+    };
+  });
+  const totalW = (stages.length - 1) * (COLS * CELL + STAGE_GAP) + COLS * CELL;
+  // Center the whole machine on the origin.
+  const dx = totalW / 2;
+  for (const b of buildings) if (b && b.pipePos) b.pipePos.x -= dx;
+  for (const st of stageMeta) st.x -= dx;
+  for (const gl of groupLabels) gl.x -= dx;
+  return {
+    stageMeta, groupLabels, isoCount: iso.length, maxHalfZ,
+    isoZ: iso.length ? maxHalfZ + 48 : null,
+    x0: stageMeta.length ? stageMeta[0].x : 0,
+    x1: stageMeta.length ? stageMeta[stageMeta.length - 1].x : 0,
+    span: Math.max(totalW * 0.8, maxHalfZ * 2 + (iso.length ? 80 : 0), 80),
+  };
+}
+
+const INITIAL_MODE = /*__MODE__*/"engine";  // "engine" | "orbit" | "circuit" | "arc" | "pipeline"
+let vizMode = INITIAL_MODE;
+// Pin every building to its pipeline position, the single 3D layout.
+function applyLayout() {
+  city.span = city.pipe.span;
+  for (const b of city.buildings) {
+    if (!b) continue;
+    b.x = b.pipePos.x;
+    b.z = b.pipePos.z;
+    b.baseY = b.pipePos.baseY;
+  }
+}
+
+// ---------- Camera & projection ----------
+const cam = {
+  yaw: 0.35, pitch: 0.5, zoom: 1,
+  autoSpin: true, spinSpeed: 0.1,
+  lastInteract: -1e9,
+  flickYaw: 0, flickPitch: 0,  // release momentum (orbit free-tumble)
+};
+
+function project(x, y, z, out) {
+  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  const xr = x * cy - z * sy;
+  const zr = x * sy + z * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const yr = y * cp - zr * sp;
+  const zr2 = y * sp + zr * cp;
+  const dist = city.span * 1.9;
+  const F = city.span * 2.2;
+  // Scale derives from the live viewport each call so resizes (and embeds
+  // that start at 0x0) stay correct.
+  const base = Math.min(W, H) / (city.span * 1.08);
+  const s = (F / (F + zr2 + dist)) * cam.zoom * base;
+  out.x = W / 2 + xr * s;
+  out.y = H * 0.56 - yr * s;
+  out.depth = zr2;
+  out.s = s;
+  return out;
+}
+
+// ---------- Flows ----------
+function buildFlows(data, buildings) {
+  const edges = [...data.edges].sort((a, b) => b.weight - a.weight);
+  // One shared budget split between the two streams: gold logic pulses
+  // (importer -> imported) and blue data droplets returning the other way.
+  const MAX_PARTICLES = 240;
+  const flows = [];
+  let budget = MAX_PARTICLES;
+  for (const e of edges) {
+    const a = buildings[e.from], b = buildings[e.to];
+    if (!a || !b) continue;
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const fl = { a, b, from: e.from, to: e.to, len, speed: 26 / len, logic: [], data: [] };
+    if (budget > 1) {
+      const n = Math.min(2 + Math.floor(Math.log2(e.weight + 1)), 4, budget);
+      budget -= n;
+      const nl = Math.ceil(n / 2);
+      for (let i = 0; i < nl; i++) fl.logic.push({ t: Math.random(), jitter: (Math.random() - 0.5) * 2.2 });
+      for (let i = 0; i < n - nl; i++) fl.data.push({ t: Math.random(), jitter: (Math.random() - 0.5) * 2.2 });
+    }
+    flows.push(fl);
+  }
+  return flows;
+}
+
+// Focused edges always animate, even past the particle budget.
+function ensureParts(fl) {
+  if (!fl.logic.length) fl.logic.push({ t: Math.random(), jitter: 0 });
+  if (!fl.data.length) fl.data.push({ t: Math.random(), jitter: 0 });
+}
+
+// Folder-level rivers: edges aggregated by each file's containing folder, so
+// the architecture (which folders feed which) reads at a glance.
+function buildRivers(data, buildings, root) {
+  const agg = new Map();
+  for (const e of data.edges) {
+    const a = buildings[e.from], b = buildings[e.to];
+    if (!a || !b) continue;
+    const ta = a.node, tb = b.node;
+    if (ta === tb) continue;
+    const key = ta.path + " " + tb.path;
+    if (!agg.has(key)) agg.set(key, { a: ta, b: tb, weight: 0 });
+    agg.get(key).weight += e.weight;
+  }
+  const nodeMembers = new Map();
+  buildings.forEach((b, i) => {
+    if (!b) return;
+    if (!nodeMembers.has(b.node)) nodeMembers.set(b.node, []);
+    nodeMembers.get(b.node).push(i);
+  });
+  const rivers = [];
+  for (const r of agg.values()) {
+    const n = Math.min(1 + Math.round(Math.sqrt(r.weight)), 5);
+    const logic = [], dataParts = [];
+    for (let i = 0; i < Math.max(1, Math.ceil(n / 2)); i++)
+      logic.push({ t: Math.random(), jitter: (Math.random() - 0.5) * 3 });
+    for (let i = 0; i < Math.max(1, Math.floor(n / 2)); i++)
+      dataParts.push({ t: Math.random(), jitter: (Math.random() - 0.5) * 3 });
+    rivers.push({
+      aIdxs: nodeMembers.get(r.a) || [], bIdxs: nodeMembers.get(r.b) || [],
+      weight: r.weight,
+      nameA: r.a.name, nameB: r.b.name,
+      speed: 0.35, logic, data: dataParts,
+      width: 1 + Math.sqrt(r.weight) * 0.9,
+    });
+  }
+  return rivers;
+}
+
+// A river's mouth/outlet track the live centroids of its folders' buildings.
+function riverEnds(rv, buildings) {
+  const cen = idxs => {
+    let x = 0, z = 0;
+    for (const i of idxs) { x += buildings[i].x; z += buildings[i].z; }
+    const k = idxs.length || 1;
+    return [x / k, z / k];
+  };
+  const [ax, az] = cen(rv.aIdxs), [bx, bz] = cen(rv.bIdxs);
+  rv.ax = ax; rv.az = az; rv.bx = bx; rv.bz = bz;
+  const len = Math.hypot(bx - ax, bz - az) || 1;
+  rv.lift = 26 + len * 0.24;
+}
+
+function flowLift(fl) {
+  const a = fl.a, b = fl.b;
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  fl.lift = Math.max(a.baseY + a.h, b.baseY + b.h) + 8 + len * 0.2;
+  return fl.lift;
+}
+
+function bez3(x0, y0, z0, x1, y1, z1, lift, t, out) {
+  const mt = 1 - t;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  out.x = mt * mt * x0 + 2 * mt * t * cx + t * t * x1;
+  out.y = mt * mt * y0 + 2 * mt * t * lift + t * t * y1;
+  out.z = mt * mt * z0 + 2 * mt * t * cz + t * t * z1;
+  return out;
+}
+
+// ---------- Engine schematic (2D cross-section, like a jet-engine diagram) ----------
+// Side view, inputs to outputs: labeled phase bands, files as blade rows
+// grouped by folder, dependency ribbons that heat up (blue -> red) as flow
+// moves deeper into the machine, all wrapped in a nacelle silhouette.
+let engine = null;
+const ecam = { zoom: 1, px: 0, py: 0 };
+
+function buildEngine(data, buildings) {
+  const SW = 130, BW2 = 30, VGAP = 7, GGAP = 22;
+  let maxStage = 0;
+  for (const b of buildings) if (b && b.stage > maxStage) maxStage = b.stage;
+  const stages = [];
+  for (let si = 0; si <= maxStage; si++) {
+    const groups = new Map();
+    buildings.forEach((b, i) => {
+      if (!b || b.stage !== si) return;
+      const key = b.node.path || "/";
+      if (!groups.has(key)) groups.set(key, { name: b.node.name, idxs: [] });
+      groups.get(key).idxs.push(i);
+    });
+    stages.push([...groups.values()].sort((a, b) => b.idxs.length - a.idxs.length));
+  }
+  const blades = {};
+  const groupTags = [];
+  let maxHalfH = 0;
+  stages.forEach((groups, si) => {
+    const x = si * SW;
+    let y = 0;
+    const placed = [];
+    for (const g of groups) {
+      const y0 = y;
+      g.idxs.sort((a, b) => data.files[b].loc - data.files[a].loc);
+      for (const fi of g.idxs) {
+        const h = Math.max(13, Math.min(58, 6 + 5.2 * Math.log2(data.files[fi].loc + 2)));
+        placed.push([fi, x, y, h]);
+        y += h + VGAP;
+      }
+      groupTags.push({ stage: si, name: g.name, x, y: y - VGAP + 4 });
+      y += GGAP;
+    }
+    const half = (y - GGAP - VGAP) / 2;
+    maxHalfH = Math.max(maxHalfH, half);
+    for (const [fi, bx, by, h] of placed) blades[fi] = { x: bx, y: by - half, w: BW2, h };
+    for (const gt of groupTags) if (gt.stage === si && gt.half === undefined) { gt.half = half; gt.y -= half; }
+  });
+  // Standalone files ride in an auxiliary tray under the nacelle.
+  const iso = [];
+  buildings.forEach((b, i) => { if (b && b.stage === -1) iso.push(i); });
+  iso.sort((a, b) => data.files[b].loc - data.files[a].loc);
+  const trayY = maxHalfH + 78;
+  const perRow = Math.max(4, Math.ceil(iso.length / 2));
+  iso.forEach((fi, k) => {
+    blades[fi] = {
+      x: (k % perRow) * (BW2 + 12) + ((maxStage * SW) - (perRow - 1) * (BW2 + 12)) / 2,
+      y: trayY + Math.floor(k / perRow) * 34, w: BW2, h: 24, iso: true,
+    };
+  });
+  const trayRows = iso.length ? Math.ceil(iso.length / perRow) : 0;
+  // Vertical extent includes the header row above and the aux tray below, so
+  // the whole machine centers and fits regardless of tray size.
+  const yTop = -(maxHalfH + 84);
+  const yBottom = (iso.length ? trayY + trayRows * 34 : maxHalfH) + 60;
+  return {
+    blades, groupTags, maxStage, SW,
+    w: maxStage * SW, halfH: maxHalfH,
+    yTop, yBottom,
+    trayY: iso.length ? trayY : null, isoCount: iso.length,
+  };
+}
+
+function heatColor(frac, alpha) {
+  // cool intake blue -> combustion orange -> exhaust red
+  const stopsC = [[96, 178, 255], [140, 200, 255], [255, 170, 80], [255, 96, 60]];
+  const t = Math.min(1, Math.max(0, frac)) * (stopsC.length - 1);
+  const i = Math.min(stopsC.length - 2, Math.floor(t));
+  const f = t - i;
+  const c = stopsC[i].map((v, k) => Math.round(v + (stopsC[i + 1][k] - v) * f));
+  return `rgba(${c[0]},${c[1]},${c[2]},${alpha})`;
+}
+
+function eXY(mx, my, out) {
+  // engine-model -> screen
+  const fit = Math.min(W / (engine.w + 280), H / (engine.yBottom - engine.yTop)) * ecam.zoom;
+  out.x = W / 2 + (mx - engine.w / 2 + ecam.px) * fit;
+  out.y = H / 2 + (my - (engine.yTop + engine.yBottom) / 2 + ecam.py) * fit;
+  out.s = fit;
+  return out;
+}
+
+function ebez(x0, y0, x1, y1, back, t, out) {
+  const dx = x1 - x0;
+  let c1x, c1y, c2x, c2y;
+  if (!back) {
+    c1x = x0 + dx * 0.42; c1y = y0;
+    c2x = x1 - dx * 0.42; c2y = y1;
+  } else {
+    // Return flow loops under the engine like a bypass duct.
+    const dip = engine.halfH + 46;
+    c1x = x0 + 46; c1y = dip;
+    c2x = x1 - 46; c2y = dip;
+  }
+  const mt = 1 - t;
+  out.x = mt*mt*mt*x0 + 3*mt*mt*t*c1x + 3*mt*t*t*c2x + t*t*t*x1;
+  out.y = mt*mt*mt*y0 + 3*mt*mt*t*c1y + 3*mt*t*t*c2y + t*t*t*y1;
+  return out;
+}
+
+function renderEngine(now, dt) {
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H * 0.5, 10, W / 2, H * 0.5, Math.max(W, H) * 0.6);
+  g.addColorStop(0, "rgba(38, 58, 105, 0.28)");
+  g.addColorStop(1, "rgba(10, 14, 23, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const focused = focusIdx >= 0;
+
+  // --- Nacelle hull ---
+  const a = {}, b = {}, c = {}, d = {};
+  const HY = engine.halfH + 40;
+  eXY(-95, -HY + 12, a); eXY(engine.w + 60, -HY - 6, b);
+  eXY(engine.w + 60, HY + 6, c); eXY(-95, HY - 12, d);
+  eXY(engine.w + 140, 0, tmp);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.quadraticCurveTo((a.x + b.x) / 2, Math.min(a.y, b.y) - 18, b.x, b.y);
+  ctx.quadraticCurveTo(tmp.x, tmp.y - 20, tmp.x, tmp.y);      // nozzle top
+  ctx.quadraticCurveTo(tmp.x, tmp.y + 20, c.x, c.y);          // nozzle bottom
+  ctx.quadraticCurveTo((c.x + d.x) / 2, Math.max(c.y, d.y) + 18, d.x, d.y);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(110, 125, 155, 0.07)";
+  ctx.strokeStyle = "rgba(130, 150, 190, 0.35)";
+  ctx.lineWidth = 2;
+  ctx.fill(); ctx.stroke();
+
+  // --- Phase bands + header ---
+  ctx.textAlign = "center";
+  for (let si = 0; si <= engine.maxStage; si++) {
+    eXY(si * engine.SW, 0, tmp);
+    const bandW = engine.SW * tmp.s;
+    if (si % 2 === 1) {
+      ctx.fillStyle = "rgba(80, 100, 140, 0.06)";
+      ctx.fillRect(tmp.x - bandW / 2, a.y, bandW, d.y - a.y);
+    }
+    const label = si === 0 ? "INTAKE" : si === engine.maxStage ? "CORE" : "STAGE " + (si + 1);
+    const isEnd = si === 0 || si === engine.maxStage;
+    const hy = Math.max(a.y - 14, 64);
+    if (isEnd || bandW >= 58) {
+      ctx.font = `700 ${isEnd ? 13 : 11}px ui-monospace, Menlo, monospace`;
+      ctx.fillStyle = heatColor(si / Math.max(1, engine.maxStage), isEnd ? 0.95 : 0.6);
+      ctx.fillText(label, tmp.x, hy);
+    }
+    if (si < engine.maxStage && bandW >= 58) {
+      ctx.fillStyle = "rgba(120, 150, 200, 0.5)";
+      ctx.fillText("\u00bb", tmp.x + bandW / 2, hy);
+    }
+  }
+  if (engine.trayY !== null) {
+    eXY(engine.w / 2, engine.trayY - 22, tmp);
+    ctx.font = "600 10.5px ui-monospace, Menlo, monospace";
+    ctx.fillStyle = "rgba(127, 143, 176, 0.6)";
+    ctx.fillText("auxiliary: no tracked imports", tmp.x, tmp.y);
+  }
+
+  // --- Ribbons (the flow) ---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const fl of flows) {
+    const ba = engine.blades[fl.from], bb = engine.blades[fl.to];
+    if (!ba || !bb) continue;
+    let colorOverride = null, alpha = 0.16, width = 1.5, dimmedFlow = false;
+    if (focused) {
+      if (fl.from === focusIdx) colorOverride = DEP_COLOR + "0.5)";
+      else if (fl.to === focusIdx) colorOverride = USER_COLOR + "0.5)";
+      else dimmedFlow = true;
+    }
+    if (dimmedFlow) { alpha = 0.03; width = 1; }
+    const sa = city.buildings[fl.from].stage, sb = city.buildings[fl.to].stage;
+    const back = sb <= sa && !(city.buildings[fl.to].iso);
+    const frac = ((sa + sb) / 2) / Math.max(1, engine.maxStage);
+    const x0 = ba.x + ba.w / 2, y0 = ba.y + ba.h / 2;
+    const x1 = bb.x - bb.w / 2, y1 = bb.y + bb.h / 2;
+    ctx.beginPath();
+    const STEPS = 14;
+    for (let k = 0; k <= STEPS; k++) {
+      ebez(x0, y0, x1, y1, back, k / STEPS, tmp);
+      eXY(tmp.x, tmp.y, tmp2);
+      k === 0 ? ctx.moveTo(tmp2.x, tmp2.y) : ctx.lineTo(tmp2.x, tmp2.y);
+    }
+    ctx.strokeStyle = colorOverride || heatColor(frac, alpha);
+    ctx.lineWidth = width + (fl.logic.length > 1 ? 0.8 : 0);
+    ctx.setLineDash(back ? [5, 5] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (dimmedFlow) continue;
+    // Arrowhead at the callee end: the direction logic flows.
+    ebez(x0, y0, x1, y1, back, 0.94, tmp); eXY(tmp.x, tmp.y, tmp2);
+    const ahx = tmp2.x, ahy = tmp2.y;
+    ebez(x0, y0, x1, y1, back, 1, tmp); eXY(tmp.x, tmp.y, tmp2);
+    arrowHead(ahx, ahy, tmp2.x, tmp2.y, Math.max(3, 4.2 * tmp2.s * 0.9),
+      colorOverride || LOGIC_COLOR + "0.75)");
+    // Gold logic pulses ride the ribbon forward; blue data droplets return.
+    for (const pcl of fl.logic) {
+      if (!flowPaused) { pcl.t += dt * 0.3; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        ebez(x0, y0, x1, y1, back, tt, tmp);
+        eXY(tmp.x, tmp.y + pcl.jitter, tmp2);
+        const r = (k === 0 ? 2.4 : 1.7 - k * 0.3) * Math.max(0.6, tmp2.s * 0.9);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = LOGIC_COLOR + (k === 0 ? 0.95 : 0.4 - k * 0.08) + ")";
+        ctx.fill();
+      }
+    }
+    for (const pcl of fl.data) {
+      if (!flowPaused) { pcl.t += dt * 0.22; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        ebez(x0, y0, x1, y1, back, 1 - tt, tmp);
+        eXY(tmp.x, tmp.y + pcl.jitter, tmp2);
+        const r = (k === 0 ? 1.9 : 1.4 - k * 0.3) * Math.max(0.6, tmp2.s * 0.9);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = DATA_COLOR + (k === 0 ? 0.9 : 0.35 - k * 0.07) + ")";
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+
+  // --- Blades (files) ---
+  for (let i = 0; i < city.buildings.length; i++) {
+    const bl = engine.blades[i];
+    const bd = city.buildings[i];
+    if (!bl || !bd) continue;
+    eXY(bl.x - bl.w / 2, bl.y, tmp); eXY(bl.x + bl.w / 2, bl.y + bl.h, tmp2);
+    const rx = tmp.x, ry = tmp.y, rw = tmp2.x - tmp.x, rh = tmp2.y - tmp.y;
+    let ring = null, dim = bl.iso && !focused;
+    if (focused) {
+      if (i === focusIdx) ring = "rgba(255,255,255,0.95)";
+      else if (focusDeps.has(i)) ring = DEP_COLOR + "0.9)";
+      else if (focusUsers.has(i)) ring = USER_COLOR + "0.9)";
+      else dim = true;
+    }
+    ctx.save();
+    if (dim) ctx.globalAlpha = focused ? 0.15 : 0.45;
+    const col = bd.color;
+    const grad = ctx.createLinearGradient(rx, ry, rx + rw, ry);
+    grad.addColorStop(0, `rgb(${Math.round(col[0]*0.65)},${Math.round(col[1]*0.65)},${Math.round(col[2]*0.65)})`);
+    grad.addColorStop(0.5, `rgb(${col[0]},${col[1]},${col[2]})`);
+    grad.addColorStop(1, `rgb(${Math.round(col[0]*0.55)},${Math.round(col[1]*0.55)},${Math.round(col[2]*0.55)})`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    const rr = Math.min(4, rw / 3);
+    ctx.roundRect(rx, ry, rw, rh, rr);
+    ctx.fill();
+    if (ring) { ctx.strokeStyle = ring; ctx.lineWidth = 2; ctx.stroke(); }
+    if (bd.f.entry) {
+      ctx.beginPath();
+      ctx.arc(rx - 6, ry + rh / 2, 3, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 230, 140, 0.95)";
+      ctx.shadowColor = "rgba(255, 220, 120, 0.9)";
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    // File name on the blade when there's room.
+    if (rh > 11 && rw > 20 && tmp2.s > 1.05) {
+      const nm = bd.f.path.split("/").pop();
+      ctx.font = `600 ${Math.min(10, rh * 0.5)}px ui-monospace, Menlo, monospace`;
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(234, 242, 255, 0.85)";
+      const label = nm.length > 20 ? nm.slice(0, 18) + "…" : nm;
+      ctx.fillText(label, rx + rw + 5, ry + rh / 2 + 3);
+    }
+    ctx.restore();
+    bd._bbox = [rx, ry, tmp2.x, tmp2.y];
+    bd._depth = 0;
+  }
+
+  // --- Folder tags ---
+  ctx.textAlign = "right";
+  ctx.font = "600 9.5px ui-monospace, Menlo, monospace";
+  for (const gt of engine.groupTags) {
+    eXY(gt.x - 22, gt.y, tmp);
+    if (tmp.s < 0.85) continue;
+    const nm = gt.name.length > 14 ? gt.name.slice(0, 12) + "…" : gt.name;
+    ctx.fillStyle = "rgba(168, 190, 230, 0.5)";
+    ctx.fillText(nm + "/", tmp.x, tmp.y);
+  }
+  ctx.textAlign = "center";
+}
+
+// ---------- Orbit constellation (3D folder clusters on a sphere) ----------
+// Folders become clusters spread over a fibonacci sphere; each cluster's files
+// sit on a small fibonacci shell around its center, so siblings stay together
+// while the whole graph reads as one constellation.
+let orbit = null;
+const OCTA_LANGS = new Set(["html", "css", "sql", "shell"]);
+
+function fibPoint(k, n, radius, out) {
+  // Golden-angle spiral: spreads n points over a sphere without pole crowding.
+  const y = n === 1 ? 0 : 1 - 2 * (k + 0.5) / n;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  const th = k * 2.399963229728653;
+  out.x = Math.cos(th) * r * radius;
+  out.y = y * radius;
+  out.z = Math.sin(th) * r * radius;
+  return out;
+}
+
+function buildOrbit(data, buildings) {
+  const groups = new Map();
+  buildings.forEach((b, i) => {
+    if (!groups.has(b.node)) groups.set(b.node, { idxs: [] });
+    groups.get(b.node).idxs.push(i);
+  });
+  const clusters = [...groups.values()].sort((a, b) => b.idxs.length - a.idxs.length);
+  const R = Math.max(46, 20 * Math.sqrt(clusters.length));
+  const p = {};
+  let maxShell = 0;
+  clusters.forEach((cl, ci) => {
+    fibPoint(ci, clusters.length, clusters.length === 1 ? 0 : R, p);
+    const cx = p.x, cy2 = p.y, cz = p.z;
+    const shell = cl.idxs.length === 1 ? 0 : 7 + 3.2 * Math.sqrt(cl.idxs.length);
+    maxShell = Math.max(maxShell, shell);
+    cl.idxs.sort((a, b) => data.files[b].loc - data.files[a].loc);
+    cl.idxs.forEach((fi, k) => {
+      fibPoint(k, cl.idxs.length, shell, p);
+      buildings[fi].orb = {
+        x: cx + p.x, y: cy2 + p.y, z: cz + p.z,
+        // Half-size by volume (cbrt) so a 10x file reads ~2x, clamped so tiny
+        // configs stay clickable and monsters don't swallow their cluster.
+        s: Math.min(7.5, Math.max(2, Math.cbrt(data.files[fi].loc + 1) * 0.75)),
+        octa: OCTA_LANGS.has(data.files[fi].lang),
+      };
+    });
+  });
+  return { span: (R + maxShell) * 2.15 };
+}
+
+function renderOrbit(now, dt) {
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H * 0.5, 10, W / 2, H * 0.5, Math.max(W, H) * 0.6);
+  g.addColorStop(0, "rgba(38, 58, 105, 0.3)");
+  g.addColorStop(1, "rgba(10, 14, 23, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // Flick momentum: released drags keep tumbling, decaying over ~2s.
+  if (!dragging && (cam.flickYaw || cam.flickPitch)) {
+    cam.yaw += cam.flickYaw * dt;
+    cam.pitch += cam.flickPitch * dt;
+    const decay = Math.exp(-2.2 * dt);
+    cam.flickYaw *= decay;
+    cam.flickPitch *= decay;
+    if (Math.abs(cam.flickYaw) < 0.02 && Math.abs(cam.flickPitch) < 0.02)
+      cam.flickYaw = cam.flickPitch = 0;
+  }
+  if (cam.autoSpin && focusIdx < 0 && now - cam.lastInteract > 3000) cam.yaw += cam.spinSpeed * dt;
+  city.span = orbit.span;  // project() scales off the live span
+  const focused = focusIdx >= 0;
+  const lx = Math.cos(cam.yaw + 0.9), lz = Math.sin(cam.yaw + 0.9);
+
+  // --- Solids, far to near. Every face has a consistent outward winding, so
+  // the screen-space test in drawQuad/drawTri culls exactly the back faces at
+  // any camera angle (poles and upside-down included); faces within a solid
+  // draw far-to-near. Verified: cubes show 1-3 faces, octahedra 1-4, never 0.
+  const order = city.buildings.map((b, i) => {
+    project(b.orb.x, b.orb.y, b.orb.z, tmp);
+    b._depth = tmp.depth;
+    return i;
+  }).sort((i, j) => city.buildings[j]._depth - city.buildings[i]._depth);
+  for (const i of order) {
+    const b = city.buildings[i];
+    const o = b.orb, s = o.s;
+    let dimmed = false, ring = null;
+    if (focused) {
+      if (i === focusIdx) ring = "rgba(255, 255, 255, 0.95)";
+      else if (focusDeps.has(i)) ring = DEP_COLOR + "0.95)";
+      else if (focusUsers.has(i)) ring = USER_COLOR + "0.95)";
+      else dimmed = true;
+    }
+    const glow = (i === hoverIdx || i === focusIdx) ? 1.25 : 1;
+    ctx.save();
+    if (dimmed) ctx.globalAlpha = 0.15;
+    let facesDrawn = 0;
+    if (o.octa) {
+      // Two 4-sided pyramids joined at a square equator; html/css/sql/shell
+      // read as gems so support files stand apart from code cubes.
+      const hs = s * 1.4;
+      const eq = [[s, 0], [0, s], [-s, 0], [0, -s]];
+      for (let k = 0; k < 4; k++) project(o.x + eq[k][0], o.y, o.z + eq[k][1], P[k]);
+      project(o.x, o.y + hs, o.z, P[4]);
+      project(o.x, o.y - hs, o.z, P[5]);
+      // Face f: equator edge (f>>1, f>>1 + 1); even = upper tri, odd = lower.
+      const faces = [0, 1, 2, 3, 4, 5, 6, 7];
+      const fd = faces.map(f => {
+        const k = f >> 1, k2 = (k + 1) % 4;
+        return P[k].depth + P[k2].depth + (f & 1 ? P[5].depth : P[4].depth);
+      });
+      faces.sort((f1, f2) => fd[f2] - fd[f1]);
+      for (const f of faces) {
+        const k = f >> 1, k2 = (k + 1) % 4;
+        const mx = eq[k][0] + eq[k2][0], mz = eq[k][1] + eq[k2][1];
+        const lit = 0.42 + 0.4 * Math.max(0, (mx * lx + mz * lz) / (s * Math.SQRT2));
+        const drawn = (f & 1)
+          ? drawTri(P[k2], P[k], P[5], shade(b.color, lit * 0.62 * glow))
+          : drawTri(P[k], P[k2], P[4], shade(b.color, Math.min(1.05, lit + 0.18) * glow));
+        if (drawn) facesDrawn++;
+      }
+    } else {
+      for (let k = 0; k < 4; k++) {
+        const cxx = o.x + (k === 1 || k === 2 ? s : -s);
+        const czz = o.z + (k >= 2 ? s : -s);
+        project(cxx, o.y - s, czz, P[k]);
+        project(cxx, o.y + s, czz, P[k + 4]);
+      }
+      // 4 sides + top + bottom, all wound outward: the cube stays closed
+      // whichever way the constellation is tumbled.
+      const faces = [
+        [0, 1, 5, 4, 0, -1, 0], [1, 2, 6, 5, 1, 0, 0],
+        [2, 3, 7, 6, 0, 1, 0], [3, 0, 4, 7, -1, 0, 0],
+        [4, 5, 6, 7, 0, 0, 1], [3, 2, 1, 0, 0, 0, -1],
+      ];
+      const fdep = q => P[q[0]].depth + P[q[1]].depth + P[q[2]].depth + P[q[3]].depth;
+      faces.sort((f1, f2) => fdep(f2) - fdep(f1));
+      for (const [a, b2, c, d, nx, nz, ny] of faces) {
+        const lit = ny > 0 ? 0.95 : ny < 0 ? 0.3 : 0.42 + 0.4 * Math.max(0, nx * lx + nz * lz);
+        if (drawQuad(P[a], P[b2], P[c], P[d], shade(b.color, lit * glow))) facesDrawn++;
+      }
+    }
+    b._faces = facesDrawn;  // read by the headless test harness
+    ctx.restore();
+    const nP = o.octa ? 6 : 8;
+    let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+    for (let k = 0; k < nP; k++) {
+      minx = Math.min(minx, P[k].x); maxx = Math.max(maxx, P[k].x);
+      miny = Math.min(miny, P[k].y); maxy = Math.max(maxy, P[k].y);
+    }
+    b._bbox = [minx, miny, maxx, maxy];
+    if (ring) {
+      project(o.x, o.y + s * 1.9, o.z, tmp);
+      ctx.beginPath();
+      ctx.arc(tmp.x, tmp.y, 6 * Math.max(cam.zoom, 0.6), 0, Math.PI * 2);
+      ctx.strokeStyle = ring;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (b.f.entry && !dimmed) {
+      project(o.x, o.y + s * 1.6, o.z, tmp);
+      ctx.beginPath();
+      ctx.arc(tmp.x, tmp.y, 2.6 * cam.zoom + 1, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 230, 140, 0.95)";
+      ctx.shadowColor = "rgba(255, 220, 120, 0.9)";
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // --- Import arcs: gold logic out (arrowheads), blue data returning ---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const fl of flows) {
+    const oa = city.buildings[fl.from].orb, ob = city.buildings[fl.to].orb;
+    let color = null, dimmedFlow = false;
+    if (focused) {
+      if (fl.from === focusIdx) color = DEP_COLOR;
+      else if (fl.to === focusIdx) color = USER_COLOR;
+      else dimmedFlow = true;
+    }
+    const len = Math.hypot(ob.x - oa.x, ob.y - oa.y, ob.z - oa.z) || 1;
+    const lift = Math.max(oa.y, ob.y) + 6 + len * 0.16;
+    drawArc(oa.x, oa.y, oa.z, ob.x, ob.y, ob.z, lift,
+      color ? color + "0.4)" : `rgba(90, 170, 235, ${dimmedFlow ? 0.02 : 0.09})`,
+      color ? 1.6 : 1, !dimmedFlow);
+    if (dimmedFlow) continue;
+    if (color) ensureParts(fl);
+    const spd = Math.min(0.5, 30 / len);
+    for (const pcl of fl.logic) {
+      if (!flowPaused) { pcl.t += dt * spd; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        bez3(oa.x, oa.y, oa.z, ob.x, ob.y, ob.z, lift, tt, tmp);
+        project(tmp.x, tmp.y, tmp.z, tmp2);
+        const r = (k === 0 ? 2.2 : 1.6 - k * 0.28) * Math.max(cam.zoom, 0.5);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = LOGIC_COLOR + (k === 0 ? 0.9 : 0.4 - k * 0.08) + ")";
+        ctx.fill();
+      }
+    }
+    for (const pcl of fl.data) {
+      if (!flowPaused) { pcl.t += dt * spd * 0.75; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        bez3(oa.x, oa.y, oa.z, ob.x, ob.y, ob.z, lift, 1 - tt, tmp);
+        project(tmp.x, tmp.y, tmp.z, tmp2);
+        const r = (k === 0 ? 1.8 : 1.3 - k * 0.28) * Math.max(cam.zoom, 0.5);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = DATA_COLOR + (k === 0 ? 0.85 : 0.35 - k * 0.07) + ")";
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// ---------- Circuit board (2D PCB schematic) ----------
+// Every folder is a chip, its files are pads on the chip, and imports run as
+// copper traces through the gutters with signal pulses along them.
+let circuit = null;
+const ccam = { zoom: 1, px: 0, py: 0 };
+
+function buildCircuit(data, buildings) {
+  const PS = 13, PGAP = 6, CPAD = 11, LABEL_H = 15, GUT = 46;
+  const groups = new Map();
+  buildings.forEach((b, i) => {
+    if (!groups.has(b.node)) groups.set(b.node, { node: b.node, idxs: [] });
+    groups.get(b.node).idxs.push(i);
+  });
+  const chips = [...groups.values()];
+  for (const ch of chips) {
+    ch.idxs.sort((a, b) => data.files[b].loc - data.files[a].loc);
+    ch.cols = Math.max(1, Math.ceil(Math.sqrt(ch.idxs.length)));
+    ch.rows = Math.ceil(ch.idxs.length / ch.cols);
+    ch.w = ch.cols * (PS + PGAP) - PGAP + CPAD * 2;
+    ch.h = ch.rows * (PS + PGAP) - PGAP + CPAD * 2 + LABEL_H;
+  }
+  // Shelf-pack chips onto a roughly square board with wide gutters so traces
+  // have room to run between them (same idea as packRects, chip-sized).
+  chips.sort((a, b) => b.w * b.h - a.w * a.h);
+  const total = chips.reduce((s, c) => s + (c.w + GUT) * (c.h + GUT), 0);
+  const targetW = Math.max(200, Math.sqrt(total) * 1.25);
+  let cx = 0, cy = 0, shelfH = 0, maxX = 0;
+  for (const ch of chips) {
+    if (cx > 0 && cx + ch.w > targetW) { cx = 0; cy += shelfH + GUT; shelfH = 0; }
+    ch.x = cx; ch.y = cy;
+    cx += ch.w + GUT;
+    shelfH = Math.max(shelfH, ch.h);
+    maxX = Math.max(maxX, ch.x + ch.w);
+  }
+  const pads = {};
+  for (const ch of chips) {
+    ch.idxs.forEach((fi, k) => {
+      pads[fi] = {
+        x: ch.x + CPAD + (k % ch.cols) * (PS + PGAP),
+        y: ch.y + LABEL_H + CPAD + Math.floor(k / ch.cols) * (PS + PGAP),
+        w: PS, h: PS,
+      };
+    });
+  }
+  // Precomputed 3-segment Manhattan routes, pad center to pad center; the
+  // segment lengths let pulses interpolate by distance at uniform speed.
+  const routes = new Map();
+  for (const e of data.edges) {
+    const pa = pads[e.from], pb = pads[e.to];
+    if (!pa || !pb) continue;
+    const x0 = pa.x + PS / 2, y0 = pa.y + PS / 2;
+    const x1 = pb.x + PS / 2, y1 = pb.y + PS / 2;
+    const mx = (x0 + x1) / 2;
+    const pts = [[x0, y0], [mx, y0], [mx, y1], [x1, y1]];
+    let totalLen = 0;
+    const lens = [];
+    for (let k = 1; k < pts.length; k++) {
+      const L = Math.abs(pts[k][0] - pts[k - 1][0]) + Math.abs(pts[k][1] - pts[k - 1][1]);
+      lens.push(L);
+      totalLen += L;
+    }
+    routes.set(e.from + "," + e.to, { pts, lens, total: Math.max(totalLen, 1) });
+  }
+  return { chips, pads, routes, w: maxX, h: cy + shelfH, LABEL_H };
+}
+
+function cXY(mx, my, out) {
+  // circuit-model -> screen
+  const fit = Math.min(W / (circuit.w + 120), H / (circuit.h + 120)) * ccam.zoom;
+  out.x = W / 2 + (mx - circuit.w / 2 + ccam.px) * fit;
+  out.y = H / 2 + (my - circuit.h / 2 + ccam.py) * fit;
+  out.s = fit;
+  return out;
+}
+
+function routeAt(rt, dist, out) {
+  let d = dist;
+  for (let k = 0; k < rt.lens.length; k++) {
+    const L = rt.lens[k];
+    if (d <= L || k === rt.lens.length - 1) {
+      const f = L ? Math.min(1, d / L) : 0;
+      out.x = rt.pts[k][0] + (rt.pts[k + 1][0] - rt.pts[k][0]) * f;
+      out.y = rt.pts[k][1] + (rt.pts[k + 1][1] - rt.pts[k][1]) * f;
+      return out;
+    }
+    d -= L;
+  }
+  return out;
+}
+
+function renderCircuit(now, dt) {
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H * 0.5, 10, W / 2, H * 0.5, Math.max(W, H) * 0.6);
+  g.addColorStop(0, "rgba(30, 58, 44, 0.3)");
+  g.addColorStop(1, "rgba(10, 14, 23, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const focused = focusIdx >= 0;
+  cXY(0, 0, tmp);
+  const fit = tmp.s;
+
+  // --- Board grid dots ---
+  const step = 26;
+  // Skip when zoomed out (dots would smear into noise) and only walk the
+  // model range that's actually on screen.
+  if (fit * step > 9) {
+    ctx.fillStyle = "rgba(120, 175, 135, 0.1)";
+    const mx0 = Math.max(-step * 2, -W / 2 / fit + circuit.w / 2 - ccam.px - step);
+    const mx1 = Math.min(circuit.w + step * 2, W / 2 / fit + circuit.w / 2 - ccam.px + step);
+    const my0 = Math.max(-step * 2, -H / 2 / fit + circuit.h / 2 - ccam.py - step);
+    const my1 = Math.min(circuit.h + step * 2, H / 2 / fit + circuit.h / 2 - ccam.py + step);
+    for (let gx = Math.floor(mx0 / step) * step; gx <= mx1; gx += step) {
+      for (let gy = Math.floor(my0 / step) * step; gy <= my1; gy += step) {
+        cXY(gx, gy, tmp);
+        ctx.fillRect(tmp.x - 0.75, tmp.y - 0.75, 1.5, 1.5);
+      }
+    }
+  }
+
+  // --- Traces (under the chips so only gutter runs show) ---
+  for (const fl of flows) {
+    const rt = circuit.routes.get(fl.from + "," + fl.to);
+    if (!rt) continue;
+    let color = null, dimmedFlow = false;
+    if (focused) {
+      if (fl.from === focusIdx) color = DEP_COLOR + "0.6)";
+      else if (fl.to === focusIdx) color = USER_COLOR + "0.6)";
+      else dimmedFlow = true;
+    }
+    for (let k = 0; k < 4; k++) cXY(rt.pts[k][0], rt.pts[k][1], P[k]);
+    ctx.beginPath();
+    ctx.moveTo(P[0].x, P[0].y);
+    // arcTo overshoots when the radius exceeds half a segment, so clamp it.
+    const rr = Math.min(6 * fit,
+      Math.abs(P[1].x - P[0].x) / 2, Math.abs(P[2].y - P[1].y) / 2, Math.abs(P[3].x - P[2].x) / 2);
+    if (rr > 0.5) {
+      ctx.arcTo(P[1].x, P[1].y, P[2].x, P[2].y, rr);
+      ctx.arcTo(P[2].x, P[2].y, P[3].x, P[3].y, rr);
+    } else {
+      ctx.lineTo(P[1].x, P[1].y);
+      ctx.lineTo(P[2].x, P[2].y);
+    }
+    ctx.lineTo(P[3].x, P[3].y);
+    ctx.strokeStyle = color || `rgba(140, 200, 120, ${dimmedFlow ? 0.04 : 0.28})`;
+    ctx.lineWidth = dimmedFlow ? 1 : 1.4;
+    ctx.stroke();
+  }
+
+  // --- Chips ---
+  ctx.textAlign = "center";
+  for (const ch of circuit.chips) {
+    cXY(ch.x, ch.y, tmp);
+    cXY(ch.x + ch.w, ch.y + ch.h, tmp2);
+    const rx = tmp.x, ry = tmp.y, rw = tmp2.x - rx, rh = tmp2.y - ry;
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, rw, rh, Math.min(5 * fit, rw / 4));
+    ctx.fillStyle = "rgba(16, 26, 21, 0.92)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(140, 200, 120, 0.3)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    if (rw > 46) {
+      const nm = ch.node.name.length > 16 ? ch.node.name.slice(0, 15) + "…" : ch.node.name;
+      ctx.font = `600 ${Math.min(10.5, circuit.LABEL_H * fit * 0.66)}px ui-monospace, Menlo, monospace`;
+      ctx.fillStyle = "rgba(190, 225, 190, 0.7)";
+      ctx.fillText(nm, rx + rw / 2, ry + Math.max(9, circuit.LABEL_H * fit * 0.8));
+    }
+  }
+
+  // --- Pads (one per file) ---
+  for (let i = 0; i < city.buildings.length; i++) {
+    const pd = circuit.pads[i], b = city.buildings[i];
+    if (!pd) continue;
+    cXY(pd.x, pd.y, tmp);
+    cXY(pd.x + pd.w, pd.y + pd.h, tmp2);
+    const rx = tmp.x, ry = tmp.y, rw = tmp2.x - rx, rh = tmp2.y - ry;
+    let ring = null, dim = false;
+    if (focused) {
+      if (i === focusIdx) ring = "rgba(255, 255, 255, 0.95)";
+      else if (focusDeps.has(i)) ring = DEP_COLOR + "0.9)";
+      else if (focusUsers.has(i)) ring = USER_COLOR + "0.9)";
+      else dim = true;
+    }
+    ctx.save();
+    if (dim) ctx.globalAlpha = 0.2;
+    // Fixed pad size; loc shows as brightness so the grid stays regular.
+    const k = 0.55 + 0.45 * Math.min(1, Math.log2(b.f.loc + 2) / 11);
+    ctx.fillStyle = shade(b.color, k * (i === hoverIdx ? 1.25 : 1));
+    ctx.fillRect(rx, ry, rw, rh);
+    if (ring) {
+      ctx.strokeStyle = ring;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rx - 1, ry - 1, rw + 2, rh + 2);
+    }
+    if (b.f.entry) {
+      ctx.beginPath();
+      ctx.arc(rx + rw / 2, ry - Math.max(3, 4 * fit), 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 230, 140, 0.95)";
+      ctx.shadowColor = "rgba(255, 220, 120, 0.9)";
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+    b._bbox = [rx, ry, tmp2.x, tmp2.y];
+    b._depth = 0;
+  }
+
+  // --- Signal pulses (over everything, they're the live activity): gold
+  // logic runs the trace toward the callee pad, blue data returns. ---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const fl of flows) {
+    const rt = circuit.routes.get(fl.from + "," + fl.to);
+    if (!rt) continue;
+    let color = null;
+    if (focused) {
+      if (fl.from === focusIdx) color = DEP_COLOR;
+      else if (fl.to === focusIdx) color = USER_COLOR;
+      else continue;
+      ensureParts(fl);
+    }
+    // Arrowhead where the trace enters the callee pad.
+    cXY(rt.pts[2][0], rt.pts[2][1], tmp);
+    cXY(rt.pts[3][0], rt.pts[3][1], tmp2);
+    arrowHead(tmp.x, tmp.y, tmp2.x, tmp2.y, Math.max(3, 4 * fit),
+      (color || LOGIC_COLOR) + "0.75)");
+    const spd = Math.min(0.9, 110 / rt.total);
+    for (const pcl of fl.logic) {
+      if (!flowPaused) { pcl.t += dt * spd; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 3; k++) {
+        const tt = pcl.t - k * 0.025;
+        if (tt < 0) continue;
+        routeAt(rt, tt * rt.total, tmp);
+        cXY(tmp.x, tmp.y, tmp2);
+        const r = (k === 0 ? 2.3 : 1.6 - k * 0.35) * Math.max(fit, 0.6);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = LOGIC_COLOR + (k === 0 ? 0.9 : 0.35) + ")";
+        ctx.fill();
+      }
+    }
+    for (const pcl of fl.data) {
+      if (!flowPaused) { pcl.t += dt * spd * 0.75; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 3; k++) {
+        const tt = pcl.t - k * 0.025;
+        if (tt < 0) continue;
+        routeAt(rt, (1 - tt) * rt.total, tmp);
+        cXY(tmp.x, tmp.y, tmp2);
+        const r = (k === 0 ? 1.9 : 1.3 - k * 0.35) * Math.max(fit, 0.6);
+        if (r <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = DATA_COLOR + (k === 0 ? 0.85 : 0.3) + ")";
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// ---------- Arc skyline (2D arc diagram along a baseline) ----------
+// Files stand on one baseline ordered by (stage, folder) so imports mostly
+// point right: forward imports arc above the line, backward ones dip below.
+let arcd = null;
+const acam = { zoom: 1, px: 0, py: 0 };
+
+function buildArcDiagram(data, buildings) {
+  const BARW = 10, BGAP = 4, GGAP = 18;
+  const live = [], iso = [];
+  buildings.forEach((b, i) => (b.stage === -1 ? iso : live).push(i));
+  live.sort((a, b) => {
+    const A = buildings[a], B = buildings[b];
+    if (A.stage !== B.stage) return A.stage - B.stage;
+    if (A.node.path !== B.node.path) return A.node.path < B.node.path ? -1 : 1;
+    return data.files[b].loc - data.files[a].loc;
+  });
+  const bars = {};
+  const groupTags = [];
+  let x = 0, gStart = 0, gNode = null, maxBarH = 0;
+  for (const fi of live) {
+    const b = buildings[fi];
+    if (gNode !== b.node) {
+      if (gNode !== null) {
+        groupTags.push({ name: gNode.name, x0: gStart, x1: x - BGAP });
+        x += GGAP;
+      }
+      gNode = b.node;
+      gStart = x;
+    }
+    const h = Math.max(10, Math.min(92, 6 + 8.5 * Math.log2(data.files[fi].loc + 2)));
+    maxBarH = Math.max(maxBarH, h);
+    bars[fi] = { x, w: BARW, h };
+    x += BARW + BGAP;
+  }
+  if (gNode !== null) groupTags.push({ name: gNode.name, x0: gStart, x1: x - BGAP });
+  const w = Math.max(x - BGAP, 1);
+  // Arc radii bound the vertical extent; the max span normalizes heat color.
+  let maxSpan = 1, maxUp = 0, maxDown = 0;
+  for (const e of data.edges) {
+    const ba = bars[e.from], bb = bars[e.to];
+    if (!ba || !bb) continue;
+    const r = Math.abs((bb.x + bb.w / 2) - (ba.x + ba.w / 2)) / 2;
+    maxSpan = Math.max(maxSpan, r * 2);
+    if (bb.x >= ba.x) maxUp = Math.max(maxUp, r);
+    else maxDown = Math.max(maxDown, r);
+  }
+  // Standalone files park in a dimmed block at the bottom right.
+  const ISO_CELL = 12;
+  const isoCols = Math.max(1, Math.min(iso.length, Math.ceil(Math.sqrt(iso.length * 3))));
+  iso.sort((a, b) => data.files[b].loc - data.files[a].loc);
+  const isoY = maxDown + 46;
+  iso.forEach((fi, k) => {
+    bars[fi] = {
+      x: w - (isoCols - (k % isoCols)) * ISO_CELL,
+      y: isoY + Math.floor(k / isoCols) * ISO_CELL,
+      w: 8, h: 8, iso: true,
+    };
+  });
+  const isoRows = iso.length ? Math.ceil(iso.length / isoCols) : 0;
+  return {
+    bars, groupTags, w, maxSpan,
+    yTop: -(Math.max(maxUp, maxBarH) + 26),
+    yBottom: (iso.length ? isoY + isoRows * ISO_CELL : maxDown + 30) + 12,
+    isoX: iso.length ? w - isoCols * ISO_CELL : 0, isoY, isoCount: iso.length,
+  };
+}
+
+function aXY(mx, my, out) {
+  // arc-model -> screen
+  const fit = Math.min(W / (arcd.w + 140), H / (arcd.yBottom - arcd.yTop + 70)) * acam.zoom;
+  out.x = W / 2 + (mx - arcd.w / 2 + acam.px) * fit;
+  out.y = H / 2 + (my - (arcd.yTop + arcd.yBottom) / 2 + acam.py) * fit;
+  out.s = fit;
+  return out;
+}
+
+function renderArcDiagram(now, dt) {
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H * 0.5, 10, W / 2, H * 0.5, Math.max(W, H) * 0.6);
+  g.addColorStop(0, "rgba(38, 58, 105, 0.28)");
+  g.addColorStop(1, "rgba(10, 14, 23, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  const focused = focusIdx >= 0;
+  aXY(0, 0, tmp);
+  const fit = tmp.s;
+
+  // --- Baseline ---
+  aXY(-16, 0, tmp);
+  aXY(arcd.w + 16, 0, tmp2);
+  ctx.beginPath();
+  ctx.moveTo(tmp.x, tmp.y);
+  ctx.lineTo(tmp2.x, tmp2.y);
+  ctx.strokeStyle = "rgba(130, 150, 190, 0.35)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // --- Arcs + particles (importer -> imported) ---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const fl of flows) {
+    const ba = arcd.bars[fl.from], bb = arcd.bars[fl.to];
+    if (!ba || !bb || ba.iso || bb.iso) continue;
+    const x0 = ba.x + ba.w / 2, x1 = bb.x + bb.w / 2;
+    if (x0 === x1) continue;
+    const forward = x1 > x0;
+    const r = Math.abs(x1 - x0) / 2;
+    const cxm = (x0 + x1) / 2;
+    let color = null, dimmedFlow = false;
+    if (focused) {
+      if (fl.from === focusIdx) color = DEP_COLOR;
+      else if (fl.to === focusIdx) color = USER_COLOR;
+      else dimmedFlow = true;
+    }
+    // The uniform scale of aXY maps model semicircles to screen circles.
+    aXY(cxm, 0, tmp);
+    ctx.beginPath();
+    if (forward) ctx.arc(tmp.x, tmp.y, r * fit, Math.PI, Math.PI * 2);
+    else ctx.arc(tmp.x, tmp.y, r * fit, 0, Math.PI);
+    ctx.strokeStyle = color ? color + "0.55)"
+      : heatColor((r * 2) / arcd.maxSpan, dimmedFlow ? 0.03 : 0.25);
+    ctx.lineWidth = dimmedFlow ? 1 : 1.3;
+    ctx.setLineDash(forward ? [] : [4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (dimmedFlow) continue;
+    // Arrowhead at the callee end of the arc (logic direction).
+    const angEnd = forward ? Math.PI * 2 : Math.PI;
+    aXY(cxm + Math.cos(angEnd - 0.15) * r, Math.sin(angEnd - 0.15) * r, tmp);
+    aXY(cxm + Math.cos(angEnd) * r, Math.sin(angEnd) * r, tmp2);
+    arrowHead(tmp.x, tmp.y, tmp2.x, tmp2.y, Math.max(3, 4 * fit),
+      (color || LOGIC_COLOR) + "0.75)");
+    if (color) ensureParts(fl);
+    const spd = Math.min(0.6, 30 / (Math.PI * r + 1));
+    // Gold logic runs source -> target along the arc; blue data returns.
+    for (const pcl of fl.logic) {
+      if (!flowPaused) { pcl.t += dt * spd; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        const ang = forward ? Math.PI + tt * Math.PI : tt * Math.PI;
+        aXY(cxm + Math.cos(ang) * r, Math.sin(ang) * r, tmp2);
+        const rad = (k === 0 ? 2.2 : 1.5 - k * 0.25) * Math.max(fit, 0.55);
+        if (rad <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = LOGIC_COLOR + (k === 0 ? 0.9 : 0.35) + ")";
+        ctx.fill();
+      }
+    }
+    for (const pcl of fl.data) {
+      if (!flowPaused) { pcl.t += dt * spd * 0.75; if (pcl.t >= 1) pcl.t %= 1; }
+      for (let k = 0; k < 4; k++) {
+        const tt = pcl.t - k * 0.02;
+        if (tt < 0) continue;
+        const ang = forward ? Math.PI + (1 - tt) * Math.PI : (1 - tt) * Math.PI;
+        aXY(cxm + Math.cos(ang) * r, Math.sin(ang) * r, tmp2);
+        const rad = (k === 0 ? 1.8 : 1.2 - k * 0.25) * Math.max(fit, 0.55);
+        if (rad <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(tmp2.x, tmp2.y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = DATA_COLOR + (k === 0 ? 0.85 : 0.3) + ")";
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+
+  // --- Bars (files on the baseline; standalone squares bottom right) ---
+  for (let i = 0; i < city.buildings.length; i++) {
+    const br = arcd.bars[i], b = city.buildings[i];
+    if (!br) continue;
+    let ring = null, dim = br.iso && !focused;
+    if (focused) {
+      if (i === focusIdx) ring = "rgba(255, 255, 255, 0.95)";
+      else if (focusDeps.has(i)) ring = DEP_COLOR + "0.9)";
+      else if (focusUsers.has(i)) ring = USER_COLOR + "0.9)";
+      else dim = true;
+    }
+    const y0 = br.iso ? br.y : -br.h, y1 = br.iso ? br.y + br.h : 0;
+    aXY(br.x, y0, tmp);
+    aXY(br.x + br.w, y1, tmp2);
+    const rx = tmp.x, ry = tmp.y, rw = tmp2.x - rx, rh = tmp2.y - ry;
+    ctx.save();
+    if (dim) ctx.globalAlpha = focused ? 0.15 : 0.45;
+    const col = b.color;
+    const grad = ctx.createLinearGradient(rx, ry, rx, ry + rh);
+    grad.addColorStop(0, `rgb(${col[0]},${col[1]},${col[2]})`);
+    grad.addColorStop(1, `rgb(${Math.round(col[0] * 0.55)},${Math.round(col[1] * 0.55)},${Math.round(col[2] * 0.55)})`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, rw, rh, Math.min(2.5, rw / 3));
+    ctx.fill();
+    if (ring) {
+      ctx.strokeStyle = ring;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (b.f.entry && !br.iso) {
+      ctx.beginPath();
+      ctx.arc(rx + rw / 2, ry - 5, 2.6, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 230, 140, 0.95)";
+      ctx.shadowColor = "rgba(255, 220, 120, 0.9)";
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+    b._bbox = [rx, ry, tmp2.x, tmp2.y];
+    b._depth = 0;
+  }
+
+  // --- Folder tags + standalone label ---
+  ctx.textAlign = "center";
+  ctx.font = "600 9.5px ui-monospace, Menlo, monospace";
+  for (const gt of arcd.groupTags) {
+    if ((gt.x1 - gt.x0) * fit < 26) continue;
+    aXY((gt.x0 + gt.x1) / 2, 12, tmp);
+    const nm = gt.name.length > 14 ? gt.name.slice(0, 12) + "…" : gt.name;
+    ctx.fillStyle = "rgba(168, 190, 230, 0.5)";
+    ctx.fillText(nm + "/", tmp.x, tmp.y + 6);
+  }
+  if (arcd.isoCount) {
+    aXY(arcd.isoX, arcd.isoY - 8, tmp);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(127, 143, 176, 0.6)";
+    ctx.fillText("standalone: no tracked imports", tmp.x, tmp.y);
+    ctx.textAlign = "center";
+  }
+}
+
+// ---------- State ----------
+let city, flows, rivers;
+let focusIdx = -1, focusDeps = new Set(), focusUsers = new Set();
+let riverView = false, flowPaused = false;
+const ripples = [];
+
+function init() {
+  if (!DATA || !DATA.files || DATA.files.length === 0) {
+    document.getElementById("empty").style.display = "flex";
+    document.getElementById("repo-name").textContent = DATA ? DATA.name : "no data";
+    return false;
+  }
+  city = buildModel(DATA);
+  city.pipe = buildPipeline(DATA, city.buildings);
+  applyLayout();
+  engine = buildEngine(DATA, city.buildings);
+  // These three need .stage/.node, so they build after pipeline staging.
+  orbit = buildOrbit(DATA, city.buildings);
+  circuit = buildCircuit(DATA, city.buildings);
+  arcd = buildArcDiagram(DATA, city.buildings);
+  flows = buildFlows(DATA, city.buildings);
+  rivers = buildRivers(DATA, city.buildings, city.root);
+
+  document.getElementById("repo-name").textContent = DATA.name;
+  document.getElementById("stats").textContent =
+    `${DATA.totals.files} files · ${DATA.totals.loc.toLocaleString()} lines · ${DATA.totals.edges} dependency streams`;
+
+  const langs = new Map();
+  for (const f of DATA.files) langs.set(f.lang, (langs.get(f.lang) || 0) + f.loc);
+  const totalLoc = [...langs.values()].reduce((s, v) => s + v, 0) || 1;
+  const sorted = [...langs.entries()].sort((a, b) => b[1] - a[1]);
+  const legend = document.getElementById("legend");
+  // Thin stacked bar: each language's share of total LOC, in language colors.
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  for (const [lang, loc] of sorted) {
+    const c = LANG_COLORS[lang] || LANG_COLORS.other;
+    const seg = document.createElement("span");
+    seg.style.background = `rgb(${c[0]},${c[1]},${c[2]})`;
+    seg.style.width = (100 * loc / totalLoc) + "%";
+    bar.appendChild(seg);
+  }
+  legend.appendChild(bar);
+  sorted.slice(0, 8).forEach(([lang, loc]) => {
+    const c = LANG_COLORS[lang] || LANG_COLORS.other;
+    const pct = Math.round(100 * loc / totalLoc);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<span class="sw" style="background: rgb(${c[0]},${c[1]},${c[2]})"></span>${lang} ${pct < 1 ? "&lt;1" : pct}%`;
+    legend.appendChild(row);
+  });
+  // The two currents every mode shares.
+  const flowKey = document.createElement("div");
+  flowKey.className = "flows";
+  flowKey.innerHTML =
+    `<div class="row"><span class="sw dot" style="background: rgb(255,210,120)"></span>logic: calls, intake to core</div>` +
+    `<div class="row"><span class="sw dot" style="background: rgb(120,190,255)"></span>data: returns, core to intake</div>`;
+  legend.appendChild(flowKey);
+  return true;
+}
+
+// ---------- Focus mode ----------
+function setFocus(idx) {
+  focusIdx = idx;
+  focusDeps.clear(); focusUsers.clear();
+  const panel = document.getElementById("panel");
+  if (idx < 0) { panel.style.display = "none"; return; }
+  for (const e of DATA.edges) {
+    if (e.from === idx) focusDeps.add(e.to);
+    if (e.to === idx) focusUsers.add(e.from);
+  }
+  const b = city.buildings[idx];
+  document.getElementById("panel-path").textContent = b.f.path;
+  document.getElementById("panel-meta").innerHTML =
+    `${b.f.loc.toLocaleString()} lines · ${b.f.lang}${b.f.entry ? " · entrypoint ✦" : ""}`;
+  const fill = (elId, countId, set, emptyMsg) => {
+    const el = document.getElementById(elId);
+    document.getElementById(countId).textContent = `(${set.size})`;
+    el.innerHTML = "";
+    if (!set.size) {
+      el.innerHTML = `<div class="none">${emptyMsg}</div>`;
+      return;
+    }
+    [...set].map(i => city.buildings[i]).sort((x, y) => y.f.loc - x.f.loc).forEach(nb => {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.textContent = nb.f.path;
+      div.addEventListener("click", () => setFocus(DATA.files.indexOf(nb.f)));
+      el.appendChild(div);
+    });
+  };
+  fill("panel-deps", "panel-dep-count", focusDeps, "imports nothing in this repo");
+  fill("panel-users", "panel-user-count", focusUsers, "nothing in this repo imports it");
+  panel.style.display = "block";
+  cam.lastInteract = performance.now();
+}
+
+// ---------- Rendering ----------
+const P = [{}, {}, {}, {}, {}, {}, {}, {}], tmp = {}, tmp2 = {};
+let hoverIdx = -1;
+
+function shade(color, k) {
+  return `rgb(${Math.round(color[0] * k)},${Math.round(color[1] * k)},${Math.round(color[2] * k)})`;
+}
+
+function drawQuad(a, b, c, d, fill) {
+  const area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+  if (area >= 0) return false;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  return true;
+}
+
+// Triangle with the same screen-space winding cull as drawQuad.
+function drawTri(a, b, c, fill) {
+  const area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+  if (area >= 0) return false;
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.lineTo(c.x, c.y);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  return true;
+}
+
+// Small arrowhead at q, pointing along p -> q.
+function arrowHead(px, py, qx, qy, size, fill) {
+  const dx = qx - px, dy = qy - py;
+  const L = Math.hypot(dx, dy) || 1;
+  const ux = dx / L, uy = dy / L;
+  ctx.beginPath();
+  ctx.moveTo(qx, qy);
+  ctx.lineTo(qx - ux * size - uy * size * 0.55, qy - uy * size + ux * size * 0.55);
+  ctx.lineTo(qx - ux * size + uy * size * 0.55, qy - uy * size - ux * size * 0.55);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function drawArc(x0, y0, z0, x1, y1, z1, lift, stroke, width, arrow) {
+  bez3(x0, y0, z0, x1, y1, z1, lift, 0, tmp); project(tmp.x, tmp.y, tmp.z, P[0]);
+  bez3(x0, y0, z0, x1, y1, z1, lift, 0.5, tmp); project(tmp.x, tmp.y, tmp.z, P[1]);
+  bez3(x0, y0, z0, x1, y1, z1, lift, 1, tmp); project(tmp.x, tmp.y, tmp.z, P[2]);
+  ctx.beginPath();
+  ctx.moveTo(P[0].x, P[0].y);
+  ctx.quadraticCurveTo(2 * P[1].x - (P[0].x + P[2].x) / 2, 2 * P[1].y - (P[0].y + P[2].y) / 2, P[2].x, P[2].y);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  // Gold arrowhead at the target end: which way logic flows on this edge.
+  if (arrow) {
+    bez3(x0, y0, z0, x1, y1, z1, lift, 0.92, tmp);
+    project(tmp.x, tmp.y, tmp.z, P[1]);
+    arrowHead(P[1].x, P[1].y, P[2].x, P[2].y,
+      4.5 * Math.max(cam.zoom, 0.5), LOGIC_COLOR + "0.7)");
+  }
+}
+
+// One particle stream along an arc; rev runs it target -> source (data returns).
+function drawParticles(parts, speed, x0, y0, z0, x1, y1, z1, lift, dt, color, radius, rev) {
+  for (const p of parts) {
+    if (!flowPaused) {
+      p.t += speed * dt * 0.55;
+      if (p.t >= 1) {
+        p.t %= 1;
+        // Cap ripples so dense graphs don't dissolve into ring noise; only
+        // logic arrivals splash at the callee.
+        if (!rev && ripples.length < 14) ripples.push({ x: x1, y: y1, z: z1, age: 0 });
+      }
+    }
+    for (let k = 0; k < 5; k++) {
+      const tt = p.t - k * 0.018;
+      if (tt < 0) continue;
+      bez3(x0, y0, z0, x1, y1, z1, lift, rev ? 1 - tt : tt, tmp);
+      project(tmp.x + p.jitter, tmp.y, tmp.z + p.jitter, tmp2);
+      const r = (k === 0 ? radius : radius * 0.72 - k * 0.2) * Math.max(cam.zoom, 0.5);
+      if (r <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(tmp2.x, tmp2.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = k === 0 ? color + "0.92)" : color + (0.5 - k * 0.09) + ")";
+      ctx.fill();
+    }
+  }
+}
+
+function render(now, dt) {
+  if (vizMode === "engine") { renderEngine(now, dt); return; }
+  if (vizMode === "orbit") { renderOrbit(now, dt); return; }
+  if (vizMode === "circuit") { renderCircuit(now, dt); return; }
+  if (vizMode === "arc") { renderArcDiagram(now, dt); return; }
+  ctx.clearRect(0, 0, W, H);
+  const g = ctx.createRadialGradient(W / 2, H * 0.62, 10, W / 2, H * 0.62, Math.max(W, H) * 0.55);
+  g.addColorStop(0, "rgba(38, 58, 105, 0.35)");
+  g.addColorStop(1, "rgba(10, 14, 23, 0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  if (cam.autoSpin && focusIdx < 0 && now - cam.lastInteract > 3000) cam.yaw += cam.spinSpeed * dt;
+
+  const labelJobs = [];
+
+  // --- Pipeline engine bed ---
+  {
+    const pa = 1;
+    const pipe = city.pipe;
+    const bx0 = pipe.x0 - CELL * 2, bx1 = pipe.x1 + CELL * 2, bz = pipe.maxHalfZ + 9;
+    project(bx0, 0, -bz, P[0]); project(bx1, 0, -bz, P[1]);
+    project(bx1, 0, bz, P[2]); project(bx0, 0, bz, P[3]);
+    ctx.beginPath();
+    ctx.moveTo(P[0].x, P[0].y); ctx.lineTo(P[1].x, P[1].y);
+    ctx.lineTo(P[2].x, P[2].y); ctx.lineTo(P[3].x, P[3].y);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(52, 76, 130, ${0.11 * pa})`;
+    ctx.strokeStyle = `rgba(90, 120, 185, ${0.2 * pa})`;
+    ctx.fill(); ctx.stroke();
+    // Stage ticks + labels along whichever long edge faces the camera.
+    const frontZ = P[3].y + P[2].y > P[0].y + P[1].y ? bz : -bz;
+    for (let si = 0; si < pipe.stageMeta.length; si++) {
+      const st = pipe.stageMeta[si];
+      project(st.x, 0, frontZ, tmp);
+      project(st.x, 0, -frontZ, tmp2);
+      ctx.beginPath();
+      ctx.moveTo(tmp.x, tmp.y); ctx.lineTo(tmp2.x, tmp2.y);
+      ctx.strokeStyle = `rgba(90, 120, 185, ${0.08 * pa})`;
+      ctx.stroke();
+      const isEnd = si === 0 || si === pipe.stageMeta.length - 1;
+      labelJobs.push({
+        text: isEnd ? st.label : String(si + 1),
+        x: tmp.x, y: tmp.y + 15,
+        size: isEnd ? 11.5 : 10, alpha: (isEnd ? 0.85 : 0.5) * pa,
+      });
+    }
+    if (pipe.isoZ !== null) {
+      project(0, 0, pipe.isoZ + 4, tmp);
+      labelJobs.push({ text: "standalone files (no tracked imports)", x: tmp.x, y: tmp.y + 24, size: 10, alpha: 0.45 * pa });
+    }
+    // Folder tags inside each stage keep the hierarchy readable.
+    for (const gl of city.pipe.groupLabels) {
+      if (gl.halfZ === undefined) continue;
+      project(gl.x, 0, gl.z1 - gl.halfZ - 2, tmp);
+      if (tmp.s > 1.35) {
+        const nm = gl.name.length > 14 ? gl.name.slice(0, 12) + "…" : gl.name;
+        labelJobs.push({ text: nm + "/", x: tmp.x, y: tmp.y + 10, size: 9.5, alpha: 0.42 * pa });
+      }
+    }
+  }
+
+  // --- Buildings, far to near ---
+  const order = city.buildings.map((b, i) => {
+    project(b.x, b.baseY, b.z, tmp);
+    b._depth = tmp.depth;
+    return i;
+  }).sort((i, j) => city.buildings[j]._depth - city.buildings[i]._depth);
+
+  const lx = Math.cos(cam.yaw + 0.9), lz = Math.sin(cam.yaw + 0.9);
+  const focused = focusIdx >= 0;
+
+  for (const i of order) {
+    const b = city.buildings[i];
+    const hw = BW / 2;
+    for (let k = 0; k < 4; k++) {
+      const cx = b.x + (k === 1 || k === 2 ? hw : -hw);
+      const cz = b.z + (k >= 2 ? hw : -hw);
+      project(cx, b.baseY, cz, P[k]);
+      project(cx, b.baseY + b.h, cz, P[k + 4]);
+    }
+    let dimmed = false, ring = null;
+    if (b.iso && !focused) dimmed = i !== hoverIdx;
+    if (focused) {
+      if (i === focusIdx) ring = "rgba(255, 255, 255, 0.95)";
+      else if (focusDeps.has(i)) ring = DEP_COLOR + "0.95)";
+      else if (focusUsers.has(i)) ring = USER_COLOR + "0.95)";
+      else dimmed = true;
+    }
+    const glow = (i === hoverIdx || i === focusIdx) ? 1.25 : 1;
+    ctx.save();
+    if (dimmed) ctx.globalAlpha = focused ? 0.18 : 0.45;
+    const sides = [
+      [0, 1, 5, 4, 0, -1], [1, 2, 6, 5, 1, 0],
+      [2, 3, 7, 6, 0, 1], [3, 0, 4, 7, -1, 0],
+    ];
+    for (const [a, bb, c, d, nx, nz] of sides) {
+      const lit = 0.42 + 0.4 * Math.max(0, nx * lx + nz * lz);
+      drawQuad(P[a], P[bb], P[c], P[d], shade(b.color, lit * glow));
+    }
+    drawQuad(P[7], P[6], P[5], P[4], shade(b.color, 0.95 * glow));
+    ctx.restore();
+    if (ring) {
+      project(b.x, b.baseY + b.h, b.z, tmp);
+      ctx.beginPath();
+      ctx.arc(tmp.x, tmp.y, 6 * Math.max(cam.zoom, 0.6), 0, Math.PI * 2);
+      ctx.strokeStyle = ring;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (b.f.entry && !dimmed) {
+      project(b.x, b.baseY + b.h, b.z, tmp);
+      ctx.beginPath();
+      ctx.arc(tmp.x, tmp.y, 2.6 * cam.zoom + 1, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 230, 140, 0.95)";
+      ctx.shadowColor = "rgba(255, 220, 120, 0.9)";
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
+    for (let k = 0; k < 8; k++) {
+      minx = Math.min(minx, P[k].x); maxx = Math.max(maxx, P[k].x);
+      miny = Math.min(miny, P[k].y); maxy = Math.max(maxy, P[k].y);
+    }
+    b._bbox = [minx, miny, maxx, maxy];
+  }
+
+  // --- Folder labels above buildings so the hierarchy stays legible ---
+  ctx.textAlign = "center";
+  for (const lj of labelJobs) {
+    ctx.font = `600 ${lj.size}px ui-monospace, Menlo, monospace`;
+    ctx.fillStyle = `rgba(10, 14, 23, ${lj.alpha * 0.85})`;
+    ctx.fillText(lj.text, lj.x + 1, lj.y + 1);
+    ctx.fillStyle = `rgba(168, 190, 230, ${lj.alpha})`;
+    ctx.fillText(lj.text, lj.x, lj.y);
+  }
+
+  // --- Water: gold logic downstream, blue data swimming back ---
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  if (focused) {
+    // Only the focused file's flows: cyan strokes for its dependencies,
+    // orange for its users; particles keep the logic/data scheme.
+    for (const fl of flows) {
+      let color = null;
+      if (fl.from === focusIdx) color = DEP_COLOR;
+      else if (fl.to === focusIdx) color = USER_COLOR;
+      if (!color) continue;
+      const a = fl.a, b = fl.b;
+      flowLift(fl);
+      drawArc(a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, color + "0.35)", 1.6, true);
+      ensureParts(fl);
+      drawParticles(fl.logic, fl.speed, a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, dt, LOGIC_COLOR, 2.4, false);
+      drawParticles(fl.data, fl.speed * 0.75, a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, dt, DATA_COLOR, 1.9, true);
+    }
+  } else if (riverView) {
+    for (const rv of rivers) {
+      riverEnds(rv, city.buildings);
+      drawArc(rv.ax, 4, rv.az, rv.bx, 4, rv.bz, rv.lift, "rgba(90, 170, 235, 0.22)", rv.width, true);
+      drawParticles(rv.logic, rv.speed, rv.ax, 4, rv.az, rv.bx, 4, rv.bz, rv.lift, dt, LOGIC_COLOR, 3, false);
+      drawParticles(rv.data, rv.speed * 0.75, rv.ax, 4, rv.az, rv.bx, 4, rv.bz, rv.lift, dt, DATA_COLOR, 2.4, true);
+    }
+  } else {
+    for (const fl of flows) {
+      const a = fl.a, b = fl.b;
+      flowLift(fl);
+      drawArc(a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, "rgba(90, 170, 235, 0.07)", 1, true);
+      drawParticles(fl.logic, fl.speed, a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, dt, LOGIC_COLOR, 2.2, false);
+      drawParticles(fl.data, fl.speed * 0.75, a.x, a.baseY + a.h, a.z, b.x, b.baseY + b.h, b.z, fl.lift, dt, DATA_COLOR, 1.8, true);
+    }
+  }
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    if (!flowPaused) r.age += dt;
+    if (r.age > 0.8) { ripples.splice(i, 1); continue; }
+    project(r.x, r.y, r.z, tmp);
+    ctx.beginPath();
+    ctx.arc(tmp.x, tmp.y, 2 + r.age * 26 * cam.zoom, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(130, 200, 250, ${0.5 * (1 - r.age / 0.8)})`;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- Interaction ----------
+let dragging = false, lastX = 0, lastY = 0, moved = 0;
+// Release velocity for orbit flick momentum (radians/second, smoothed).
+let velYaw = 0, velPitch = 0, lastDragT = 0;
+canvas.addEventListener("mousedown", e => {
+  dragging = true; moved = 0; lastX = e.clientX; lastY = e.clientY;
+  velYaw = velPitch = 0;
+  cam.flickYaw = cam.flickPitch = 0;  // grabbing catches a tumbling scene
+  lastDragT = performance.now();
+  canvas.classList.add("dragging");
+  cam.lastInteract = performance.now();
+});
+window.addEventListener("mouseup", e => {
+  if (dragging && moved < 5 && city) {
+    const hit = hitTest(e.clientX, e.clientY);
+    setFocus(hit);
+  } else if (dragging && vizMode === "orbit" && performance.now() - lastDragT < 120) {
+    // Flick: keep the last drag velocity as momentum.
+    cam.flickYaw = velYaw;
+    cam.flickPitch = velPitch;
+  }
+  dragging = false;
+  canvas.classList.remove("dragging");
+});
+function orbitDrag(dx, dy) {
+  // Free tumble: no pitch clamp, so the constellation rolls over the poles.
+  const dyaw = dx * 0.008, dpitch = dy * 0.005;
+  cam.yaw += dyaw;
+  cam.pitch += dpitch;
+  const nowT = performance.now();
+  const dts = Math.max(8, nowT - lastDragT) / 1000;
+  velYaw = 0.6 * velYaw + 0.4 * (dyaw / dts);
+  velPitch = 0.6 * velPitch + 0.4 * (dpitch / dts);
+  lastDragT = nowT;
+}
+window.addEventListener("mousemove", e => {
+  if (dragging) {
+    if (vizMode === "engine") {
+      const fit = Math.min(W / (engine.w + 260), H / (engine.halfH * 2 + 300)) * ecam.zoom;
+      ecam.px += (e.clientX - lastX) / fit;
+      ecam.py += (e.clientY - lastY) / fit;
+    } else if (vizMode === "circuit" || vizMode === "arc") {
+      const fc = vizMode === "circuit" ? ccam : acam;
+      (vizMode === "circuit" ? cXY : aXY)(0, 0, tmp);
+      fc.px += (e.clientX - lastX) / tmp.s;
+      fc.py += (e.clientY - lastY) / tmp.s;
+    } else if (vizMode === "orbit") {
+      orbitDrag(e.clientX - lastX, e.clientY - lastY);
+    } else {
+      cam.yaw += (e.clientX - lastX) * 0.008;
+      cam.pitch = Math.min(1.35, Math.max(0.15, cam.pitch + (e.clientY - lastY) * 0.005));
+    }
+    moved += Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY);
+    lastX = e.clientX; lastY = e.clientY;
+    cam.lastInteract = performance.now();
+    tooltip.style.display = "none";
+    hoverIdx = -1;
+    return;
+  }
+  if (!city) return;
+  hoverIdx = hitTest(e.clientX, e.clientY);
+  if (hoverIdx >= 0) {
+    const b = city.buildings[hoverIdx];
+    tooltip.innerHTML = `<div class="path">${b.f.path}</div>
+      <div class="meta">${b.f.loc.toLocaleString()} lines · ${b.f.lang}${b.f.entry ? " · entrypoint ✦" : ""}<br>
+      depends on ${b.outDeg} · used by ${b.inDeg} · click to trace</div>`;
+    tooltip.style.display = "block";
+    tooltip.style.left = Math.min(e.clientX + 16, W - 360) + "px";
+    tooltip.style.top = Math.min(e.clientY + 16, H - 96) + "px";
+  } else {
+    tooltip.style.display = "none";
+  }
+});
+function hitTest(mx, my) {
+  let best = -1, bestDepth = 1e18;
+  for (let i = 0; i < city.buildings.length; i++) {
+    const bb = city.buildings[i]._bbox;
+    if (!bb) continue;
+    if (mx >= bb[0] && mx <= bb[2] && my >= bb[1] && my <= bb[3]) {
+      if (city.buildings[i]._depth < bestDepth) { bestDepth = city.buildings[i]._depth; best = i; }
+    }
+  }
+  return best;
+}
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  if (vizMode === "engine" || vizMode === "circuit" || vizMode === "arc") {
+    const fc = vizMode === "engine" ? ecam : vizMode === "circuit" ? ccam : acam;
+    fc.zoom = Math.min(5, Math.max(0.35, fc.zoom * (e.deltaY > 0 ? 0.92 : 1.09)));
+  } else {
+    cam.zoom = Math.min(4, Math.max(0.3, cam.zoom * (e.deltaY > 0 ? 0.92 : 1.09)));
+  }
+  cam.lastInteract = performance.now();
+}, { passive: false });
+
+let touchDist = 0;
+canvas.addEventListener("touchstart", e => {
+  cam.lastInteract = performance.now();
+  velYaw = velPitch = 0;
+  cam.flickYaw = cam.flickPitch = 0;
+  lastDragT = performance.now();
+  if (e.touches.length === 1) { lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; }
+  if (e.touches.length === 2) touchDist = Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+}, { passive: true });
+canvas.addEventListener("touchend", () => {
+  if (vizMode === "orbit" && performance.now() - lastDragT < 120) {
+    cam.flickYaw = velYaw;
+    cam.flickPitch = velPitch;
+  }
+}, { passive: true });
+canvas.addEventListener("touchmove", e => {
+  e.preventDefault();
+  cam.lastInteract = performance.now();
+  if (e.touches.length === 1) {
+    if (vizMode === "orbit") {
+      orbitDrag(e.touches[0].clientX - lastX, e.touches[0].clientY - lastY);
+    } else {
+      cam.yaw += (e.touches[0].clientX - lastX) * 0.008;
+      cam.pitch = Math.min(1.35, Math.max(0.15, cam.pitch + (e.touches[0].clientY - lastY) * 0.005));
+    }
+    lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    cam.zoom = Math.min(4, Math.max(0.3, cam.zoom * (d / (touchDist || d))));
+    touchDist = d;
+  }
+}, { passive: false });
+
+document.getElementById("btn-pause").addEventListener("click", function () {
+  flowPaused = !flowPaused;
+  this.textContent = flowPaused ? "resume flow" : "pause flow";
+});
+document.getElementById("btn-spin").addEventListener("click", function () {
+  cam.autoSpin = !cam.autoSpin;
+  cam.lastInteract = -1e9;
+  this.textContent = cam.autoSpin ? "stop spin" : "start spin";
+});
+function setMode(m) {
+  vizMode = m;
+  document.getElementById("mode-select").value = m;
+  // The two rotatable 3D modes keep the spin toggle.
+  document.getElementById("btn-spin").style.display = m === "pipeline" || m === "orbit" ? "" : "none";
+  document.getElementById("btn-view").style.display = m === "pipeline" ? "" : "none";
+  document.getElementById("hintline").innerHTML = m === "orbit"
+    ? "drag to tumble &middot; flick for momentum &middot; scroll to zoom &middot; click a shape to trace it"
+    : m === "pipeline"
+    ? "drag to rotate &middot; scroll to zoom &middot; click a building to trace it"
+    : "drag to pan &middot; scroll to zoom &middot; click a file to trace it";
+  cam.lastInteract = performance.now();
+}
+document.getElementById("mode-select").addEventListener("change", function () {
+  setMode(this.value);
+});
+document.getElementById("btn-view").addEventListener("click", function () {
+  riverView = !riverView;
+  this.textContent = riverView ? "view: folder rivers" : "view: file streams";
+  this.classList.toggle("active", riverView);
+});
+document.getElementById("btn-help").addEventListener("click", () => {
+  const el = document.getElementById("howto");
+  el.style.display = el.style.display === "none" ? "block" : "none";
+});
+document.getElementById("howto-dismiss").addEventListener("click", () => {
+  document.getElementById("howto").style.display = "none";
+});
+document.getElementById("panel-close").addEventListener("click", () => setFocus(-1));
+window.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); document.getElementById("btn-pause").click(); }
+  if (e.code === "Escape") setFocus(-1);
+});
+
+// ---------- Main loop ----------
+if (init()) {
+  setMode(vizMode);
+  let last = performance.now();
+  // Invoked synchronously once so frame 1 paints immediately; some embedded
+  // contexts throttle or never fire rAF, and a synchronous first frame means
+  // even a static snapshot shows the city.
+  (function loop(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    render(now, dt);
+    requestAnimationFrame(loop);
+  })(last);
+}
+</script>
+</body>
+</html>
