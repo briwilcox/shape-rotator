@@ -6,20 +6,49 @@ jet engine.
 
 shape-rotator reads a repo's import graph, stages every file by dependency
 depth (entrypoints at the intake, the most-depended-on modules in the core),
-and writes a single self-contained HTML file with five switchable views:
+and writes a single self-contained HTML file with five switchable views.
+The captures below are the bundled [demo project](demo/tidepool).
 
-- `engine` (default): a jet-engine cross-section. Phase bands run left to
-  right, labeled INTAKE, STAGE n, and CORE. Files sit in blade rows grouped
-  by folder. Dependency ribbons heat up from blue to red as flow moves
-  deeper, and back-edges loop under the engine as a dashed bypass duct.
-- `orbit`: a 3D constellation. Each folder is a cluster of solids on a
-  sphere. Drag to any angle, flick for momentum.
-- `circuit`: a circuit board. Folders are chips, files are pads, imports
-  are copper traces carrying pulses.
-- `arc`: an arc diagram. Files sit on a baseline ordered by stage; forward
-  imports arc above it and back-edges dip below.
-- `pipeline`: the staged model as a rotatable 3D scene with particles
-  running the imports.
+## The five views
+
+### engine (default)
+
+A jet-engine cross-section. Phase bands run left to right, labeled INTAKE,
+STAGE n, and CORE. Files sit in blade rows grouped by folder. Dependency
+ribbons heat up from blue to red as flow moves deeper, and back-edges loop
+under the engine as a dashed bypass duct.
+
+![engine view: staged blade rows with animated flow](docs/engine.gif)
+
+### orbit
+
+A 3D constellation. Each folder is a cluster of solids on a sphere. Drag
+to any angle, flick for momentum.
+
+![orbit view: folder clusters tumbling in 3D](docs/orbit.gif)
+
+### circuit
+
+A circuit board. Folders are chips, files are pads, imports are copper
+traces carrying pulses.
+
+![circuit view: folder chips connected by traces](docs/circuit.gif)
+
+### arc
+
+An arc diagram. Files sit on a baseline ordered by stage; forward imports
+arc above it and back-edges dip below.
+
+![arc view: import arcs over a file baseline](docs/arc.gif)
+
+### pipeline
+
+The staged model as a rotatable 3D scene with particles running the
+imports.
+
+![pipeline view: staged 3D engine bed with particles](docs/pipeline.gif)
+
+## Logic and data
 
 Every view draws two flows on the same edges. Gold pulses are logic: calls
 running from importer to imported, the direction the arrowheads point. Blue
